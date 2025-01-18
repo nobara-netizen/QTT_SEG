@@ -17,7 +17,7 @@ import pandas as pd
 import numpy as np
 import os
 
-output_path = "config_checkpoints"
+output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
 results_csv_path = "results_final.csv"
 all_columns = ["DATASET","QTT_CONFIG", "QTT_TUNING_SCORE", "TIME_BUDGET","QTT_TEST_DICE", "ZERO_SHOT_DICE","TEST IMPROVEMENT"]
 time_budgets = [60, 120, 240, 300, 600]
@@ -88,94 +88,95 @@ if __name__ == "__main__":
     y = curve.values
 
     fit_params = {
-        "batch_size": 50,
+        "batch_size": 100,
     }
-    # for _ in range(5):
-    #     for time_budget in time_budgets:
-    #         for dataset_name in dataset_names:
-    time_budget = 30
-    dataset_name = "human_parsing_dataset"
-    if train_predictors:
-
-        perf_predictor = PerfPredictor(fit_params).fit(X,y)
-        perf_predictor.save(perf_predictor_path)
     
-        y = cost.values.reshape(-1, 1) 
 
-        cost_predictor = CostPredictor(fit_params).fit(X,y)
-        cost_predictor.save(cost_predictor_path)
+    for _ in range(5):
+        for time_budget in time_budgets:
+            for dataset_name in dataset_names:
 
-    else:    
-        perf_predictor = PerfPredictor().load(perf_predictor_path)
-        cost_predictor = CostPredictor().load(cost_predictor_path)
+                if train_predictors:
 
-    print("Generate Optimiser")
-    cs = get_config_space()
+                    perf_predictor = PerfPredictor(fit_params).fit(X,y)
+                    perf_predictor.save(perf_predictor_path)
+                
+                    y = cost.values.reshape(-1, 1) 
 
-    optimizer = QuickOptimizer(
-        cs,
-        max_fidelity=50,                
-        perf_predictor=perf_predictor,
-        cost_predictor=cost_predictor,
-        cost_aware=True,
-        cost_factor=1.0,                
-        acq_fn="ei",                    
-        patience=5,                   
-        tol=0.001,                      
-        refit=False, 
-        path = "/work/dlclarge2/dasb-Camvid/qtt_opt_state"                           
-    )
+                    cost_predictor = CostPredictor(fit_params).fit(X,y)
+                    cost_predictor.save(cost_predictor_path)
 
-    task_info = {
-    "dataset_name" : dataset_name,
-    "output_path" : output_path,
-    "root" : "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets"
-    }
+                else:    
+                    perf_predictor = PerfPredictor().load(perf_predictor_path)
+                    cost_predictor = CostPredictor().load(cost_predictor_path)
 
-    print("Optimiser Setup")
-    optimizer.setup(100)  
+                print("Generate Optimiser")
+                cs = get_config_space()
 
-    tuner = QuickTuner(
-        optimizer,
-        finetune_script,  
-    )
+                optimizer = QuickOptimizer(
+                    cs,
+                    max_fidelity=50,                
+                    perf_predictor=perf_predictor,
+                    cost_predictor=cost_predictor,
+                    cost_aware=True,
+                    cost_factor=1.0,                
+                    acq_fn="ei",                    
+                    patience=5,                   
+                    tol=0.001,                      
+                    refit=False, 
+                    path = "/work/dlclarge2/dasb-Camvid/qtt_opt_state"                           
+                )
 
-    traj, runtime, history = tuner.run(fevals=100,trial_info=task_info,  time_budget=time_budget)
-    config_id, config, score, budget, cost, info = tuner.get_incumbent()
+                task_info = {
+                "dataset_name" : dataset_name,
+                "output_path" : output_path,
+                "root" : "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets"
+                }
+
+                print("Optimiser Setup")
+                optimizer.setup(100)  
+
+                tuner = QuickTuner(
+                    optimizer,
+                    finetune_script,  
+                )
+
+                traj, runtime, history = tuner.run(fevals=100,trial_info=task_info,  time_budget=time_budget)
+                config_id, config, score, budget, cost, info = tuner.get_incumbent()
 
 
-    print()
-    print("*****   PERFORMANCE COMPARISON QTT-SEG   *****")
-    print("=================================")  
+                print()
+                print("*****   PERFORMANCE COMPARISON QTT-SEG   *****")
+                print("=================================")  
 
-    zero_shot_dice = test(
-        dataset_name, 
-        root = task_info["root"],
-        max_iters = 10,
-        zero_shot = True
-        )
+                zero_shot_dice = test(
+                    dataset_name, 
+                    root = task_info["root"],
+                    max_iters = 10,
+                    zero_shot = True
+                    )
 
-    qtt_dice = test(
-        dataset_name,
-        root = task_info["root"],
-        max_iters=10,
-        zero_shot=False,
-        predicted_model_path=f"{info['path']}/sam2model.torch",  
-        args=config
-    )
-    
-    dice_imp = ((qtt_dice - zero_shot_dice) / zero_shot_dice) * 100
+                qtt_dice = test(
+                    dataset_name,
+                    root = task_info["root"],
+                    max_iters=10,
+                    zero_shot=False,
+                    predicted_model_path=f"{info['path']}/sam2model.torch",  
+                    args=config
+                )
+                
+                dice_imp = ((qtt_dice - zero_shot_dice) / zero_shot_dice) * 100
 
-    print("Dice Improvement: {:.2f}%".format(dice_imp))
-    print("---------------------------------")
-    
-    result = {
-        "DATASET" : dataset_name,
-        "QTT_CONFIG": config, 
-        "QTT_TUNING_SCORE": score*100, 
-        "TIME_BUDGET" : time_budget,
-        "QTT_TEST_DICE" : qtt_dice,
-        "ZERO_SHOT_DICE" : zero_shot_dice,
-        "TEST IMPROVEMENT" : dice_imp
-    }
-    pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
+                print("Dice Improvement: {:.2f}%".format(dice_imp))
+                print("---------------------------------")
+                
+                result = {
+                    "DATASET" : dataset_name,
+                    "QTT_CONFIG": config, 
+                    "QTT_TUNING_SCORE": score*100, 
+                    "TIME_BUDGET" : time_budget,
+                    "QTT_TEST_DICE" : qtt_dice,
+                    "ZERO_SHOT_DICE" : zero_shot_dice,
+                    "TEST IMPROVEMENT" : dice_imp
+                }
+                pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
