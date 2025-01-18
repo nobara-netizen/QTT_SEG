@@ -1,5 +1,6 @@
 third_party/*
-
+outputs/*
+*.png
 # macOS system files
 .DS_Store
 .AppleDouble

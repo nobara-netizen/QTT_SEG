@@ -105,6 +105,7 @@ class CustomDataset():
         # Random Crop
         if args.random_crop_size:
             crop_size = ast.literal_eval(args.random_crop_size)
+            print(crop_size)
             image, mask = self.random_crop(image, mask, crop_size)
 
         # Normalize
@@ -224,7 +225,7 @@ class CustomDataset():
 
 
 if __name__ == "__main__":
-    dataset_name = "scene_parse_150"
+    dataset_name = "human_parsing_dataset"
     root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets"
     dataset = CustomDataset(dataset_name, root, train=True)
     print(dataset[0])
