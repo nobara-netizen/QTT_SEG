@@ -10,21 +10,20 @@ import logging
 
 def finetune_script(
     job: dict,
-    task_info : dict
+    trial_info : dict
 ):
-
     args = []
 
-    config = job.get("config", {})
-    config_id = job.get("config_id", None)
-    fidelity = job.get("fidelity", 1)
+    config = job.get("config")
+    config_id = job.get("config-id")
+    fidelity = job.get("fidelity")
     
-    output_path = task_info.get("output_path", ".")
+    output_path = trial_info.get("output_path", ".")
     output_dir = os.path.join(output_path, str(config_id))
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    task_info.pop("output_path")
+    trial_info.pop("output_path")
     
     # add job info items
     args.extend([
@@ -33,7 +32,7 @@ def finetune_script(
     ])
 
     # add task info items
-    for key, value in task_info.items():
+    for key, value in trial_info.items():
         args.extend([f"--{key}", str(value)])
 
     # add config items
@@ -42,7 +41,7 @@ def finetune_script(
 
     # finetune based on model type
     model_name = config.get("model_name", "")
-    return_scores_per_epoch = task_info.get("return_scores_per_epoch", False)
+    return_scores_per_epoch = trial_info.get("return_scores_per_epoch", False)
  
 
     if model_name == "SAM":
@@ -123,21 +122,21 @@ if __name__ == "__main__":
             "fidelity" : fidelity
         }
 
-        task_info = {
+        trial_info = {
         "dataset_name" : dataset_name,
         "output_path" : output_path,
         "return_scores_per_epoch" : return_scores_per_epoch 
         }
 
         if return_scores_per_epoch:
-            report, scores_per_epoch = finetune_script(job, task_info)
+            report, scores_per_epoch = finetune_script(job, trial_info)
             result = combination_dict.copy()
             result["cost"] = report["cost"]
             result["score"] = report["score"]
             result.update(scores_per_epoch)
         
         else:
-            report = finetune_script(job, task_info)
+            report = finetune_script(job, trial_info)
             result = combination_dict.copy()
             result["cost"] = report["cost"]
             result["score"] = report["score"]

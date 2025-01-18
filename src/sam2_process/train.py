@@ -31,7 +31,6 @@ valid_lora_targets = {
     "memory_cross_attn" : ["cross_attn_image.q_proj","cross_attn_image.k_proj","cross_attn_image.v_proj","cross_attn_image.out_proj"] 
 }
 
-
 def get_parser():
     parser = argparse.ArgumentParser()
 
@@ -206,7 +205,6 @@ def main(args):
 
         gt_mask = torch.tensor(mask.astype(np.float32)).cuda()
         prd_mask = torch.sigmoid(prd_masks[:, 0])
-        
         loss = (
             -gt_mask * torch.log(prd_mask + 1e-5)
             - (1 - gt_mask) * torch.log(1 - prd_mask + 1e-5)
@@ -227,6 +225,10 @@ def main(args):
             os.path.join(args.output_dir, "sam2model.torch"),
         )
         
+        # gt_mask = gt_mask.cpu().detach().numpy()
+        # prd_mask = prd_mask.cpu().detach().numpy()
+        # score = dice_multiclass(prd_mask, gt_mask)
+        
         score = np.mean(prd_scores[:, 0].cpu().detach().numpy())
         scores["epoch_" +str(itr)] = score
         accs.append(score)
@@ -236,8 +238,8 @@ def main(args):
     cost = time.time() - start_time
     mean_score = mean(scores.values())
 
-    plot_graph(accs, "ACC (IOU)", "iou_graph.png")
-    plot_graph(losses, "Loss", "loss_graph.png")
+    # plot_graph(accs, "ACC (IOU)", "iou_graph.png")
+    # plot_graph(losses, "Loss", "loss_graph.png")
     if args.return_scores_per_epoch:
         return mean_score, cost, scores
     else:

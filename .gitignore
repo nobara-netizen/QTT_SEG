@@ -1,6 +1,12 @@
 third_party/*
 outputs/*
 *.png
+config_checkpoints/*
+qtt
+costpredictor
+perfpredictor
+*.csv
+
 # macOS system files
 .DS_Store
 .AppleDouble
