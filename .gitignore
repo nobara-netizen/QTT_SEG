@@ -1,4 +1,12 @@
 third_party/*
+outputs/*
+*.png
+config_checkpoints/*
+qtt
+costpredictor
+perfpredictor
+*.csv
+logs
 
 # macOS system files
 .DS_Store
