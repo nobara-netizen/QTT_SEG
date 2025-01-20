@@ -6,6 +6,7 @@ qtt
 costpredictor
 perfpredictor
 *.csv
+logs
 
 # macOS system files
 .DS_Store

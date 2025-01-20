@@ -4,7 +4,7 @@
 #SBATCH --gpus 1 # gpus
 #SBATCH -o logs/%x.%N.%j.outputs # STDOUT  (the folder log has to be created prior to running or this won't work)
 #SBATCH -e logs/%x.%N.%j.errors # STDERR  (the folder log has to be created prior to running or this won't work)
-#SBATCH -J meta_qtt # sets the job name. If not specified, the file name will be used as job name
+#SBATCH -J qtt_seg_main # sets the job name. If not specified, the file name will be used as job name
 #SBATCH --mail-type=END,FAIL # (receive mails about end and timeouts/crashes of your job)
 # Print some information about the job to STDOUT
 echo "Workingdir: $PWD";
