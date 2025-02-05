@@ -11,6 +11,7 @@ from ConfigSpace import (
 
 from src.finetune_wrapper.finetune_script import finetune_script
 from src.sam2_process.test import test
+import uuid
 
 
 import pandas as pd
@@ -81,7 +82,7 @@ if __name__ == "__main__":
 
     df = pd.read_csv("src/finetune_wrapper/finetuning_results.csv")
     cost = df["cost"]
-    curve = df.filter(regex=r'^epoch_\d{1,2}$')
+    curve = df.filter(regex=r'^epoch_\d{1,2}_iou$')
     config = df.drop(columns=["cost" ,"score"] + curve.columns.tolist())
 
     X = config
@@ -92,10 +93,9 @@ if __name__ == "__main__":
     }
     
 
-    for _ in range(5):
+    for _ in range(20):
         for time_budget in time_budgets:
             for dataset_name in dataset_names:
-
                 if train_predictors:
 
                     perf_predictor = PerfPredictor(fit_params).fit(X,y)
@@ -124,13 +124,12 @@ if __name__ == "__main__":
                     patience=5,                   
                     tol=0.001,                      
                     refit=False, 
-                    path = "/work/dlclarge2/dasb-Camvid/qtt_opt_state"                           
+                    path = f"/work/dlclarge2/dasb-Camvid/{uuid.uuid4().hex}"       
                 )
 
                 task_info = {
                 "dataset_name" : dataset_name,
                 "output_path" : output_path,
-                "root" : "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets"
                 }
 
                 print("Optimiser Setup")
@@ -151,15 +150,13 @@ if __name__ == "__main__":
 
                 zero_shot_dice = test(
                     dataset_name, 
-                    root = task_info["root"],
-                    max_iters = 10,
+                    max_iters = 100,
                     zero_shot = True
                     )
 
                 qtt_dice = test(
                     dataset_name,
-                    root = task_info["root"],
-                    max_iters=10,
+                    max_iters=100,
                     zero_shot=False,
                     predicted_model_path=f"{info['path']}/sam2model.torch",  
                     args=config

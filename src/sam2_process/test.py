@@ -40,7 +40,6 @@ def dice_multiclass(pred, true):
 
 def test(
         dataset_name, 
-        root, 
         max_iters = 50, 
         zero_shot = True, 
         predictor = None, 
@@ -49,7 +48,7 @@ def test(
         ):
         
         
-        test_dataset = CustomDataset(dataset_name, root, train=False)
+        test_dataset = CustomDataset(dataset_name, train=False)
 
         if predictor is None:
                 sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda")
@@ -80,14 +79,16 @@ def test(
                         predictor.model.load_state_dict(torch.load(predicted_model_path))
         
         predictor.model.eval()
-        mean_score = 0
-        mean_dice = 0
+        mean_iou_all = 0
+        test_itr = 0
 
         np.random.seed(42)
 
         with torch.no_grad(): 
-                for test_itr in range(max_iters):
+                while test_itr < max_iters:
                         image, binary_masks, input_points, input_labels = test_dataset[np.random.randint(len(test_dataset))]
+                        if binary_masks.shape == (0,):
+                                continue
                         predictor.set_image(image)
                         
                         pred_masks, pred_scores, _ = predictor.predict(
@@ -101,24 +102,29 @@ def test(
                         pred_masks = pred_masks[np.arange(pred_masks.shape[0]), selected_indices]
                         pred_scores = pred_scores[np.arange(pred_scores.shape[0]), selected_indices]
                         
-                        dice = dice_multiclass(pred_masks, binary_masks)
-                        pred_scores = np.mean(pred_scores)
-                        mean_dice += dice
-                        mean_score += pred_scores
+                        # IOU
+                        prd_mask_bin = (pred_masks > 0.5).astype(np.float32)
+
+                        intersection = (binary_masks * prd_mask_bin).sum(axis=(1, 2))  
+                        union = ((binary_masks + prd_mask_bin) > 0).astype(np.float32).sum(axis=(1, 2))  
+
+                        iou = intersection / (union + 1e-6) 
+
+                        mean_iou = iou.mean()
                         
-                        print(f"Epoch: {test_itr}, Score: {np.mean(pred_scores)}, Dice: {dice}")
+                        print(f"Epoch: {test_itr}, IOU: {mean_iou}")
         
-                mean_score /= max_iters
-                mean_dice /= max_iters
-        return mean_dice
+                        mean_iou_all += mean_iou
+                        test_itr += 1
+                mean_iou_all /= max_iters
+        return mean_iou_all
 
                 
 if __name__ == "__main__":
 
         mean_score = test(
-                dataset_name="FoodSeg103",
-                root= "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets",
-                max_iters = 10,
+                dataset_name="semantic-drone-dataset",
+                max_iters = 100,
                 zero_shot = True,
         )
         print(mean_score)
