@@ -36,7 +36,6 @@ def get_parser():
 
     # Fixed args
     parser.add_argument("--dataset_name", default="FoodSeg103", type=str, help="Dataset Name")
-    parser.add_argument("--root", default="/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", type=str, help="Dataset Name")
     parser.add_argument("--output_dir", default="./outputs", type=str, help="output path")
     parser.add_argument("--num_train_epochs", default=20, type=int, help="number of training epochs")
     parser.add_argument('--return_scores_per_epoch', action='store_true', help="Return scores per epoch")
@@ -93,7 +92,7 @@ def plot_graph(loss_array, y_label, filename="loss_graph.png"):
 
 def main(args):
     sam2_model = build_sam2(model_cfg, sam2_checkpoint, device="cuda") 
-    dataset = CustomDataset(args.dataset_name, args.root, train=True, args=args)
+    dataset = CustomDataset(args.dataset_name, train=True, args=args)
 
     if args.lora:
         print("Applying LoRA")
@@ -122,7 +121,7 @@ def main(args):
             param.requires_grad = True
 
     scores = {}
-    accs = []
+    ious = {}
     losses = []
     
     if not os.path.exists(args.output_dir):
@@ -165,12 +164,11 @@ def main(args):
 
 # Training loop
     start_time = time.time()
-
-    for itr in range(args.num_train_epochs):
+    itr = 0
+    while itr < args.num_train_epochs:
         image, mask, input_point, input_label = dataset[np.random.randint(len(dataset))]
-        if mask.shape[0] == 0:
-            continue
-
+        if mask.shape == (0,):
+            continue  
         predictor.set_image(image)
 
         mask_input, unnorm_coords, labels, unnorm_box = predictor._prep_prompts(
@@ -205,6 +203,7 @@ def main(args):
 
         gt_mask = torch.tensor(mask.astype(np.float32)).cuda()
         prd_mask = torch.sigmoid(prd_masks[:, 0])
+
         loss = (
             -gt_mask * torch.log(prd_mask + 1e-5)
             - (1 - gt_mask) * torch.log(1 - prd_mask + 1e-5)
@@ -224,26 +223,35 @@ def main(args):
             predictor.model.state_dict(),
             os.path.join(args.output_dir, "sam2model.torch"),
         )
-        
-        # gt_mask = gt_mask.cpu().detach().numpy()
-        # prd_mask = prd_mask.cpu().detach().numpy()
-        # score = dice_multiclass(prd_mask, gt_mask)
+
+        # calculate iou
+
+        prd_mask_bin = (prd_mask > 0.5).float()  
+
+        intersection = (gt_mask * prd_mask_bin).sum(dim=(1, 2))  
+        union = ((gt_mask + prd_mask_bin) > 0).float().sum(dim=(1, 2))  
+
+        iou = intersection / (union + 1e-6)  
         
         score = np.mean(prd_scores[:, 0].cpu().detach().numpy())
-        scores["epoch_" +str(itr)] = score
-        accs.append(score)
+        scores[f"epoch_{itr}_score"] = score
+        ious[f"epoch_{itr}_iou"] = iou.mean().item()
+        
         losses.append(loss.item())
-        print(f"Epoch: {itr} Loss: {loss.item()} Acc: {score}")
+        print(f"Epoch: {itr} Loss: {loss.item()} Acc: {iou.mean()}")
+
+        itr += 1
 
     cost = time.time() - start_time
     mean_score = mean(scores.values())
+    mean_iou = mean(ious.values())
 
-    # plot_graph(accs, "ACC (IOU)", "iou_graph.png")
     # plot_graph(losses, "Loss", "loss_graph.png")
+   
     if args.return_scores_per_epoch:
-        return mean_score, cost, scores
+        return mean_iou, ious, cost
     else:
-        return float(mean_score), float(cost)
+        return mean_iou, cost
 
 
 if __name__ == "__main__":

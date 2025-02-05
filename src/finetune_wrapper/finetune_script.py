@@ -49,21 +49,21 @@ def finetune_script(
         args, _ = parser.parse_known_args(args)
         
         if return_scores_per_epoch:
-            score,cost, scores_per_epoch = train.main(args)
+            mean_iou, ious, cost = train.main(args)
         else:
-            score,cost = train.main(args)
+            mean_iou, cost = train.main(args)
 
     else:
         raise ValueError("Model Type not supported yet! Please try another type.")
     
     report = job.copy()
-    report["score"] = score
+    report["score"] = mean_iou
     report["cost"] = cost
     report["status"] = True  
     report["info"] = {"path": output_dir}
 
     if return_scores_per_epoch:
-        return report, scores_per_epoch
+        return report, ious
 
     return report
 
@@ -71,7 +71,7 @@ def finetune_script(
 
 if __name__ == "__main__":
     
-    num_configs = 1
+    num_configs = 600
     fidelity = 50
     output_path = "outputs"
     train_csv_path = "src/finetune_wrapper/finetuning_results.csv"
@@ -106,8 +106,9 @@ if __name__ == "__main__":
     ]
 
     base_columns = list(hyperparameter_grid.keys()) + ["cost", "score"]
-    epoch_columns = [f"epoch_{i}" for i in range(fidelity)]
-    all_columns = base_columns + epoch_columns
+    # score_columns = [f"epoch_{i}_score" for i in range(fidelity)]
+    iou_columns = [f"epoch_{i}_iou" for i in range(fidelity)]
+    all_columns = base_columns + iou_columns
 
     if not os.path.exists(train_csv_path):
         pd.DataFrame(columns=all_columns).to_csv(train_csv_path, index=False)

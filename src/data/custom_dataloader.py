@@ -19,7 +19,7 @@ import random
 
 
 class CustomDataset():
-    def __init__(self, dataset_name, root, train=True, args=None):
+    def __init__(self, dataset_name, train=True, args=None):
         
         self.args = args
         self.train = train
@@ -31,40 +31,14 @@ class CustomDataset():
         self.dataset_name = dataset_name
         data = json_data[self.dataset_name]
         
-        self.hf = False
+        df_folder = "benchmarks/dataframes"
         if self.train:
-            print("Loading Train Set!")
-            self.split = data.get("train_split")
+            self.df = pd.read_csv(f"{df_folder}/{self.dataset_name}_train.csv")
         else:
-            print("Loading Test Set!")
-            self.split = data.get("test_split")
+            self.df = pd.read_csv(f"{df_folder}/{self.dataset_name}_test.csv")
         
-        self.image_key = data.get("image_key")
-        self.label_key = data.get("label_key")
-        
-        
-        if data["type"] == "HF":
-            self.dataset = load_dataset(data.get("hf_hub_path"), split=self.split, cache_dir = root)
-            self.hf = True
-        
-        elif data["type"] == "HF_disk":
-            self.dataset = load_from_disk(os.path.join(root, self.dataset_name, self.split))
-            self.hf = True
-
-        else:
-            self.img_folder = os.path.join(root, self.dataset_name, self.split , self.image_key)
-            self.mask_folder = os.path.join(root, self.dataset_name, self.split , self.label_key)
-            
-            # Ensure both folders exist before reading
-            if self.img_folder and self.mask_folder:
-                self.image_names = sorted(os.listdir(self.img_folder))  
-                self.mask_names = sorted(os.listdir(self.mask_folder)) 
-            else:
-                raise ValueError("Image folder or mask folder is missing.")
-        
-        # Set `id2label` and `id2rgb` with default None if not found
-        self.id2label = data.get("id2label", None)
-        self.id2rgb = data.get("id2rgb", None)
+        self.image_col = "image_paths"
+        self.label_col = "mask_paths"
 
 
     def apply_augmentations(self,image, mask, args):
@@ -145,50 +119,27 @@ class CustomDataset():
         return cropped_image, cropped_mask
 
     def __len__(self):
-        if self.hf:
-            return len(self.dataset)
-        else:
-            return len(self.image_names)
+            return len(self.df)
 
     def __getitem__(self, idx):
-
-        if self.hf:
-            item = self.dataset[idx]
-            image = np.array(item[self.image_key])
-            mask = np.array(item[self.label_key])
-
-        else:
-
-            img_path = os.path.join(self.img_folder, self.image_names[idx])  
-            mask_path = os.path.join(self.mask_folder, self.mask_names[idx])  
-            
-            image = np.array(Image.open(img_path))
-            mask = np.array(Image.open(mask_path))
+        
+        image = np.array(Image.open(self.df[self.image_col].iloc[idx]))
+        mask = np.array(Image.open(self.df[self.label_col].iloc[idx]))
+        print(self.df[self.label_col].iloc[idx])
 
         if self.train:
             image, mask = self.apply_augmentations(image, mask, self.args)
         
         self.resize_factor = np.min([1024 / image.shape[1], 1024 / image.shape[0]])        
-        
-       
         image = cv2.resize(image, (int(image.shape[1] * self.resize_factor), int(image.shape[0] * self.resize_factor)))
         mask = cv2.resize(mask, (int(mask.shape[1] * self.resize_factor), int(mask.shape[0] * self.resize_factor)), interpolation=cv2.INTER_NEAREST)
        
-
         binary_masks = []
         points = [] 
-
-        if len(mask.shape) == 2:
-            unique_classes = np.unique(mask)[1:]  
-        else:
-            unique_classes = np.unique(mask.reshape(-1, mask.shape[-1]), axis=0)[1:]
-        
-        if self.id2label:
-            assert isinstance(self.id2label, dict), "The variable id2label is not a dictionary!" 
-            
-            self.id2label = {int(k): v for k, v in self.id2label.items()}
+        unique_classes = np.unique(mask)[1:]  
+       
+        try:            
             for index in unique_classes:
-                
                 binary_mask = (mask == index).astype(np.uint8) 
                 binary_masks.append(binary_mask)
                 coords = np.argwhere(binary_mask > 0) 
@@ -196,36 +147,16 @@ class CustomDataset():
                 if len(coords) > 0:
                     yx = coords[np.random.randint(len(coords))]
                     points.append([[yx[1], yx[0]]])  
-                    
-            
             if len(unique_classes) != len(points):
                 raise ValueError(f'Total unique classes: {len(unique_classes)} is not equal to points: {len(points)}')
         
-        elif self.id2rgb: 
-            assert isinstance(self.id2rgb, dict), "The variable id2rgb is not a dictionary!" 
-            
-            self.id2rgb = {int(k): v for k, v in self.id2rgb.items()}
-            for rgb_value in unique_classes:
-                binary_mask = np.all(mask == np.array(rgb_value), axis=-1).astype(np.uint8)
-                binary_masks.append(binary_mask)
-                coords = np.argwhere(binary_mask > 0) 
-                if len(coords) > 0:
-                    yx = coords[np.random.randint(len(coords))]
-                    points.append([[yx[1], yx[0]]])
-            
-            if len(unique_classes) != len(points):
-                raise ValueError(f'Total unique classes: {len(unique_classes)} is not equal to points: {len(points)}')
-        
-        else:
-            raise ValueError("Either id2label or id2rgb dict is required incase of multiclass!")
-
-        
+        except Exception as e:
+            print(f"An error occurred: {e}")
         return image, np.array(binary_masks), np.array(points), np.ones([len(points), 1]) 
 
 
 
 if __name__ == "__main__":
     dataset_name = "human_parsing_dataset"
-    root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets"
-    dataset = CustomDataset(dataset_name, root, train=True)
+    dataset = CustomDataset(dataset_name, train=True)
     print(dataset[0])
