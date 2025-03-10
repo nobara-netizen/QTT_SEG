@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -p mlhiwidlc_gpu-rtx2080 # partition (queue)
-#SBATCH -t 0-23:00 # time (D-HH:MM)
+#SBATCH -t 1-00:00 # time (D-HH:MM)
 #SBATCH --gpus 1 # gpus
 #SBATCH -o logs/%x.%N.%j.outputs # STDOUT  (the folder log has to be created prior to running or this won't work)
 #SBATCH -e logs/%x.%N.%j.errors # STDERR  (the folder log has to be created prior to running or this won't work)
-#SBATCH -J data_pipeline # sets the job name. If not specified, the file name will be used as job name
+#SBATCH -J meta_data # sets the job name. If not specified, the file name will be used as job name
 #SBATCH --mail-type=END,FAIL # (receive mails about end and timeouts/crashes of your job)
 # Print some information about the job to STDOUT
 echo "Workingdir: $PWD";
@@ -13,7 +13,6 @@ echo "Running job $SLURM_JOB_NAME using $SLURM_JOB_CPUS_PER_NODE cpus per node w
 
 # Check GPU allocation
 echo "Running Data Collection pipeline..."
-# python -m src.qtt.objective.cv.sam2_pipeline.finetune_wrapper
 python -m src.finetune_wrapper.finetune_script
 
 # Print some Information about the end-time to STDOUT

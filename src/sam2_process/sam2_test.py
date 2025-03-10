@@ -39,15 +39,12 @@ def dice_multiclass(pred, true):
         return avg_score/pred.shape[0]
 
 def test(
-        dataset_name, 
-        max_iters = 50, 
+        dataset_name = "",
         zero_shot = True, 
         predictor = None, 
         predicted_model_path = None, 
-        args=None
-        ):
-        
-        
+        args=None,
+):
         test_dataset = CustomDataset(dataset_name, train=False)
 
         if predictor is None:
@@ -70,7 +67,7 @@ def test(
                                 lora_config = LoraConfig(
                                 target_modules=target_modules,  
                                 r=args["lora_rank"],  
-                                lora_alpha=args["lora_alpha"],  
+                                lora_alpha=2 * args["lora_rank"],  
                                 lora_dropout=args["lora_dropout"],  
                                 )
                                 sam2_model = get_peft_model(sam2_model, lora_config)  
@@ -79,52 +76,41 @@ def test(
                         predictor.model.load_state_dict(torch.load(predicted_model_path))
         
         predictor.model.eval()
-        mean_iou_all = 0
+        mean_iou = 0
         test_itr = 0
 
-        np.random.seed(42)
-
         with torch.no_grad(): 
-                while test_itr < max_iters:
-                        image, binary_masks, input_points, input_labels = test_dataset[np.random.randint(len(test_dataset))]
-                        if binary_masks.shape == (0,):
+                while test_itr < len(test_dataset):
+                        image, mask, input_point, input_label = test_dataset[test_itr]
+                        
+                        if mask.shape == (0,):
                                 continue
+
                         predictor.set_image(image)
-                        
-                        pred_masks, pred_scores, _ = predictor.predict(
-                                point_coords=input_points,
-                                point_labels=input_labels
+                        prd_masks, _, _ = predictor.predict(
+                                point_coords=input_point,
+                                point_labels=input_label
                                 )
-
-
-                        sorted_indices = np.argsort(pred_scores, axis=1)[:, ::-1]
-                        selected_indices = sorted_indices[:, 0]
-                        pred_masks = pred_masks[np.arange(pred_masks.shape[0]), selected_indices]
-                        pred_scores = pred_scores[np.arange(pred_scores.shape[0]), selected_indices]
+                        if len(prd_masks.shape) == 4:
+                                prd_mask = prd_masks[:, 0, :, :]
+                        elif len(prd_masks.shape) == 3:
+                                prd_mask = np.expand_dims(prd_masks[0], axis=0)
+                        else:
+                                raise ValueError(f"Expected 3 or more predicted masks, got {prd_masks.shape[0]}")
+                        gt_mask = mask.astype(np.float32)
+                        inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
+                        iou = inter / (gt_mask.sum(1).sum(1) + (prd_mask > 0.5).sum(1).sum(1) - inter)
                         
-                        # IOU
-                        prd_mask_bin = (pred_masks > 0.5).astype(np.float32)
-
-                        intersection = (binary_masks * prd_mask_bin).sum(axis=(1, 2))  
-                        union = ((binary_masks + prd_mask_bin) > 0).astype(np.float32).sum(axis=(1, 2))  
-
-                        iou = intersection / (union + 1e-6) 
-
-                        mean_iou = iou.mean()
-                        
-                        print(f"Epoch: {test_itr}, IOU: {mean_iou}")
-        
-                        mean_iou_all += mean_iou
+                        mean_iou += mean(iou)
                         test_itr += 1
-                mean_iou_all /= max_iters
-        return mean_iou_all
+                mean_iou /= len(test_dataset)
+        return mean_iou
 
                 
 if __name__ == "__main__":
 
         mean_score = test(
-                dataset_name="semantic-drone-dataset",
-                max_iters = 100,
+                dataset_name="building",
                 zero_shot = True,
         )
         print(mean_score)

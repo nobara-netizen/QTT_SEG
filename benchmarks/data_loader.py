@@ -6,6 +6,9 @@ from datasets import load_from_disk, load_dataset
 from tqdm import tqdm
 from PIL import Image
 import numpy as np
+import yaml 
+import regex as re
+from sklearn.model_selection import train_test_split
 
 def rgb_to_id(mask, id2rgb_dict):
     
@@ -96,9 +99,64 @@ def get_pd_dataset(dataset_name, root, split="train"):
     
     return df
 
+def load_binary_df(image_root, mask_root):
+    """
+    Loads image and mask paths, then splits them into train and test sets.
+    Filters out entries where the image or corresponding mask file is invalid.
+    
+    :param image_root: Directory containing images.
+    :param mask_root: Directory containing mask images.
+    :return: DataFrames for training and testing datasets.
+    """
+    image_files = sorted([f for f in os.listdir(image_root) if f.endswith('.png')])
+    
+    valid_image_paths = []
+    valid_mask_paths = []
+    
+    for img_file in image_files:
+        img_path = os.path.join(image_root, img_file)
+        mask_file = img_file.replace("image_", "mask_")
+        mask_path = os.path.join(mask_root, mask_file)
+
+        if not (os.path.exists(img_path) and os.path.exists(mask_path)):
+            print(f"Skipping {img_file} because one of the files is missing.")
+            continue
+        
+        # Open and check the mask shape
+        mask = Image.open(mask_path).convert("L")
+        mask_array = np.array(mask)
+        print(mask_array.shape)
+        
+        if mask_array.shape == (0,):
+            print(f"Skipping {mask_file} due to invalid shape.")
+            continue
+        
+        mask.save(mask_path)  # Save the processed mask if valid
+
+        valid_image_paths.append(img_path)
+        valid_mask_paths.append(mask_path)
+    
+    df = pd.DataFrame({'image_paths': valid_image_paths, 'mask_paths': valid_mask_paths})
+    
+    # train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
+    
+    # train_df.to_csv("train.csv", index=False)
+    df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/landslides_test.csv", index=False)
+    print("Train and test CSV files saved.")
+    
+    return df
+
+
+
+
+
 if __name__ == "__main__":
-    dataset_names = ["sidewalk-semantic","semantic-drone-dataset", "FoodSeg103"]
-    for dataset_name in dataset_names:
-        df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="train")
-        df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="test")
-        print(f"{dataset_name} done!")
+    # dataset_names = ["sidewalk-semantic","semantic-drone-dataset", "FoodSeg103"]
+    # for dataset_name in dataset_names:
+    #     df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="train")
+    #     df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="test")
+    #     print(f"{dataset_name} done!")
+
+    image_root = "/work/dlclarge2/dasb-Camvid/datasets/niyarrbarman/landslide-divided/versions/1/dataset/test/images/"
+    mask_root = "/work/dlclarge2/dasb-Camvid/datasets/niyarrbarman/landslide-divided/versions/1/dataset/test/masks/"
+    load_binary_df(image_root, mask_root)

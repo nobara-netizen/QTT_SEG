@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -p mlhiwidlc_gpu-rtx2080 # partition (queue)
-#SBATCH -t 0-24:00 # time (D-HH:MM)
+#SBATCH -t 1-00:00 # time (D-HH:MM)
 #SBATCH --gpus 1 # gpus
 #SBATCH -o logs/%x.%N.%j.outputs # STDOUT  (the folder log has to be created prior to running or this won't work)
 #SBATCH -e logs/%x.%N.%j.errors # STDERR  (the folder log has to be created prior to running or this won't work)

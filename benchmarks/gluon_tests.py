@@ -51,9 +51,7 @@ if __name__ == "__main__":
             predictor.fit(train_data=train_df, tuning_data=val_df, time_limit=time_budget)
             
             np.random.seed(42)
-            sampled_indices = np.random.choice(len(test_df), size=max_iters, replace=False)
-            sampled_data = test_df.iloc[sampled_indices]
-            results = predictor.evaluate(sampled_data, metrics=[validation_metric])
+            results = predictor.evaluate(test_df, metrics=[validation_metric])
             
             report = {
                 "dataset_name" : dataset_name,

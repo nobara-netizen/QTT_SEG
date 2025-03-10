@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -p mlhiwidlc_gpu-rtx2080 # partition (queue)
-#SBATCH -t 0-12:00 # time (D-HH:MM)
+#SBATCH -t 1-00:00 # time (D-HH:MM)
 #SBATCH --gpus 1 # gpus
 #SBATCH -o logs/%x.%N.%j.outputs # STDOUT  (the folder log has to be created prior to running or this won't work)
 #SBATCH -e logs/%x.%N.%j.errors # STDERR  (the folder log has to be created prior to running or this won't work)
@@ -13,7 +13,6 @@ echo "Running job $SLURM_JOB_NAME using $SLURM_JOB_CPUS_PER_NODE cpus per node w
 
 # Check GPU allocation
 echo "Running Benchmark pipeline..."
-# python -m src.qtt.objective.cv.sam2_pipeline.finetune_wrapper
 python -m benchmarks.gluon_tests
 
 # Print some Information about the end-time to STDOUT
