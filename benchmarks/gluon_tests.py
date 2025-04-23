@@ -7,23 +7,19 @@ import numpy as np
 
 if __name__ == "__main__":
     time_budgets = [60, 120, 240, 300, 600]
-    dataset_names = ["human_parsing_dataset","sidewalk-semantic",  "danish-golf-courses-orthophotos", "semantic-drone-dataset", "FoodSeg103"]
-    max_iters = 10
+    dataset_names = ["human_parsing_dataset", "semantic-drone-dataset", "FoodSeg103"]
 
     benchmark_file = "benchmarks/gluon.csv"
     if not os.path.exists(benchmark_file):
         pd.DataFrame(columns=["dataset_name", "time_budget", "score"]).to_csv(benchmark_file, index=False)
 
     for dataset_name in dataset_names:
-       
-        df = pd.read_csv(f"benchmarks/dataframes/{dataset_name}_train.csv")
-        val_df = df.sample(n=100, random_state=42)
-        train_df = df.drop(val_df.index)
+        train_df = pd.read_csv(f"benchmarks/dataframes/{dataset_name}_train.csv")
         test_df = pd.read_csv(f"benchmarks/dataframes/{dataset_name}_test.csv")
         
-    
-        image_col = 'image_paths'
-        label_col = 'mask_paths'
+        train_df = train_df.rename(columns={'image_paths': 'image', 'mask_paths': 'label'})
+        test_df = test_df.rename(columns={'image_paths': 'image', 'mask_paths': 'label'})
+            
 
         save_path = f"/work/dlclarge2/dasb-Camvid/autogluon_tmp/{uuid.uuid4().hex}-automm_semantic_seg"
         
@@ -34,6 +30,7 @@ if __name__ == "__main__":
         for time_budget in time_budgets:
             predictor = MultiModalPredictor(
                 problem_type="semantic_segmentation",
+                label="label",
                 validation_metric=validation_metric,
                 eval_metric=validation_metric,
                 hyperparameters={
@@ -43,12 +40,11 @@ if __name__ == "__main__":
                     "optimization.efficient_finetune": efficient_finetune,
                     "model.sam.num_mask_tokens": 10,
                 },
-                label= label_col,
                 sample_data_path=train_df, 
                 path=f"/work/dlclarge2/dasb-Camvid/{uuid.uuid4().hex}"
             )
             
-            predictor.fit(train_data=train_df, tuning_data=val_df, time_limit=time_budget)
+            predictor.fit(train_data=train_df, tuning_data=test_df, time_limit=time_budget)
             
             np.random.seed(42)
             results = predictor.evaluate(test_df, metrics=[validation_metric])
@@ -58,6 +54,7 @@ if __name__ == "__main__":
                 "time_budget" : time_budget,
                 "score" : results["iou"]
             }
+            print(report)
             pd.DataFrame([report]).to_csv(benchmark_file, mode='a', index=False, header=False)
 
 

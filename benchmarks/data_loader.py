@@ -99,64 +99,41 @@ def get_pd_dataset(dataset_name, root, split="train"):
     
     return df
 
+
 def load_binary_df(image_root, mask_root):
     """
     Loads image and mask paths, then splits them into train and test sets.
     Filters out entries where the image or corresponding mask file is invalid.
-    
+
     :param image_root: Directory containing images.
     :param mask_root: Directory containing mask images.
     :return: DataFrames for training and testing datasets.
     """
-    image_files = sorted([f for f in os.listdir(image_root) if f.endswith('.png')])
     
-    valid_image_paths = []
-    valid_mask_paths = []
-    
-    for img_file in image_files:
-        img_path = os.path.join(image_root, img_file)
-        mask_file = img_file.replace("image_", "mask_")
-        mask_path = os.path.join(mask_root, mask_file)
+    image_files = []
+    mask_files = []
+    for root, dirs, files in os.walk(image_root):
+        for file in files:
+            if ".jpg" in file:
+                file_path = os.path.join(root, file)
+                image_files.append(file_path)
 
-        if not (os.path.exists(img_path) and os.path.exists(mask_path)):
-            print(f"Skipping {img_file} because one of the files is missing.")
-            continue
-        
-        # Open and check the mask shape
-        mask = Image.open(mask_path).convert("L")
-        mask_array = np.array(mask)
-        print(mask_array.shape)
-        
-        if mask_array.shape == (0,):
-            print(f"Skipping {mask_file} due to invalid shape.")
-            continue
-        
-        mask.save(mask_path)  # Save the processed mask if valid
+    mask_files = [m.replace(image_root, mask_root) for m in image_files] 
+    mask_files = [m.replace(".jpg", ".png") for m in mask_files] 
 
-        valid_image_paths.append(img_path)
-        valid_mask_paths.append(mask_path)
-    
-    df = pd.DataFrame({'image_paths': valid_image_paths, 'mask_paths': valid_mask_paths})
-    
-    # train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
-    
-    # train_df.to_csv("train.csv", index=False)
-    df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/landslides_test.csv", index=False)
-    print("Train and test CSV files saved.")
-    
-    return df
+    # Create DataFrame
+    df = pd.DataFrame({'image_paths': image_files, 'mask_paths': mask_files})
 
+    # Split into train and test
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
+    # # Save CSVs
+    train_df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/leaf_train.csv", index=False)
+    test_df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/leaf_test.csv", index=False)
 
-
+    print("Train CSV files saved.")
 
 if __name__ == "__main__":
-    # dataset_names = ["sidewalk-semantic","semantic-drone-dataset", "FoodSeg103"]
-    # for dataset_name in dataset_names:
-    #     df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="train")
-    #     df = get_pd_dataset(dataset_name, root = "/work/dlclarge2/dasb-Camvid/qtt_seg_datasets", split="test")
-    #     print(f"{dataset_name} done!")
-
-    image_root = "/work/dlclarge2/dasb-Camvid/datasets/niyarrbarman/landslide-divided/versions/1/dataset/test/images/"
-    mask_root = "/work/dlclarge2/dasb-Camvid/datasets/niyarrbarman/landslide-divided/versions/1/dataset/test/masks/"
+    image_root = "/work/dlclarge2/dasb-Camvid/datasets/fakhrealam9537/leaf-disease-segmentation-dataset/versions/4/data/data/images/"
+    mask_root = "/work/dlclarge2/dasb-Camvid/datasets/fakhrealam9537/leaf-disease-segmentation-dataset/versions/4/data/data/masks/"
     load_binary_df(image_root, mask_root)

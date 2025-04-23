@@ -13,7 +13,7 @@ import torch
 from torch.optim import SGD, Adam, AdamW, RMSprop
 from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, OneCycleLR
 import torch.nn as nn
-from peft import get_peft_model, LoraConfig
+from peft import get_peft_model, LoraConfig, TaskType
 import matplotlib.pyplot as plt
 from torch.cuda.amp import autocast
 from sam2.build_sam import build_sam2
@@ -24,16 +24,19 @@ from src.utils.utils import TARGET_MODULES_DICT, get_parser, set_seed
 import random
 from transformers import SamProcessor
 import math
+from torchmetrics.classification import JaccardIndex
 
 sam2_checkpoint = "third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt"
 model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
 
 
-def main(args, return_model=False):
+def main(args,max_time=10**18):
+    best_score = -float("inf")
+    patience_counter = 0
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
+    jaccard = JaccardIndex(task="binary").to(device)
     processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
-        
+    
     train_dataset = CustomDataset(
         dataset_name = args.dataset_name, 
         processor = processor,
@@ -43,17 +46,21 @@ def main(args, return_model=False):
         )    
     sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device) 
     predictor = SAM2ImagePredictor(sam2_model)
-
     
     if args.lora:
         lora_config = LoraConfig(
-            target_modules= TARGET_MODULES_DICT[args.lora_targets],  
             r=args.lora_rank,  
-            lora_alpha=2 * args.lora_rank,  
-            lora_dropout=args.lora_dropout,  
+            lora_alpha=2 * args.lora_rank,
+            target_modules=["attn.qkv"],
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            task_type=TaskType.FEATURE_EXTRACTION
         )
         peft_model = get_peft_model(sam2_model, lora_config)
         predictor.model = peft_model
+        for name, param in predictor.model.named_parameters():
+            if "mask_decoder" in name:
+                param.requires_grad = True
     else:
         for param in predictor.model.parameters():
             param.requires_grad = False
@@ -63,10 +70,10 @@ def main(args, return_model=False):
                 
 
     # Step 3: Confirm which parameters are trainable
-    print("Trainable parameters:")
-    for name, param in predictor.model.named_parameters():
-        if param.requires_grad:
-            print(name)
+    # print("Trainable parameters:")
+    # for name, param in predictor.model.named_parameters():
+    #     if param.requires_grad:
+    #         print(name)
 
     # Step 4: Create optimizer using only trainable params
     optimizer = torch.optim.AdamW(
@@ -78,7 +85,7 @@ def main(args, return_model=False):
     scheduler_cls = {
         "cosine": lambda opt: CosineAnnealingLR(opt, T_max=args.num_train_epochs),
         "plateau": lambda opt: ReduceLROnPlateau(
-            opt, mode="min", patience=args.patience_epochs, factor=args.decay_rate
+            opt, mode="max", patience=args.patience_epochs, factor=args.decay_rate
         ),
         "onecycle": lambda opt: OneCycleLR(
             opt, max_lr=args.lr, epochs=args.num_train_epochs, steps_per_epoch=steps_per_epoch
@@ -87,10 +94,10 @@ def main(args, return_model=False):
 
     scheduler = scheduler_cls(optimizer) if scheduler_cls else None
     scaler = torch.cuda.amp.GradScaler()
-    loss_fn = torch.nn.BCEWithLogitsLoss()
     output_dir = "output_masks_sam2"
     os.makedirs(output_dir, exist_ok=True)
 
+    loss_fn = nn.BCEWithLogitsLoss()
     scores = {}
     start_time = time.time()
 
@@ -131,50 +138,65 @@ def main(args, return_model=False):
                 gt_mask = torch.tensor(mask).unsqueeze(0).float().to(device)
                 prd_mask = torch.sigmoid(prd_masks[:, 0])
 
-                loss = (-gt_mask * torch.log(prd_mask + 1e-5) - (1 - gt_mask) * torch.log((1 - prd_mask) + 1e-5)).mean()
+                # loss = (-gt_mask * torch.log(prd_mask + 1e-5) - (1 - gt_mask) * torch.log((1 - prd_mask) + 1e-5)).mean()
                 
-                # loss = loss_fn(prd_mask, gt_mask)
+                loss = loss_fn(prd_masks[:, 0], gt_mask)
                 batch_loss += loss.item()
 
-                inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
-                iou = inter / (gt_mask.sum(1).sum(1) + (prd_mask > 0.5).sum(1).sum(1) - inter)
+                # inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
+                # iou = inter / (gt_mask.sum(1).sum(1) + (prd_mask > 0.5).sum(1).sum(1) - inter)
+                gt_mask_bin = gt_mask.int()
+                prd_mask_bin = (prd_mask > 0.5).int()
+
+                iou = jaccard(prd_mask_bin, gt_mask_bin)
+
                 batch_iou += iou.mean().item()
+
+                # print(f"[DEBUG] Loss type: {type(loss)}, requires_grad: {loss.requires_grad}")
 
                 predictor.model.zero_grad()
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
 
-        # if time.time() - start_time > max_time:
-        #     print(f"Time limit of {max_time} seconds reached. Stopping training early.")
-        #     break  # Exit the loop when time limit is reached
-
         epoch_iou = batch_iou / len(train_dataset)
         avg_iou += epoch_iou
-        scores[f"epoch_{epoch}_iou"] = epoch_iou
 
         epoch_loss = batch_loss / len(train_dataset)
         avg_loss += epoch_loss
 
-        score = test(args.dataset_name, zero_shot=False, predicted_model=predictor.model, args=args)
+        score = test(zero_shot=False, predicted_model=predictor.model, args=args)
         print(f"Epoch: {epoch} IOU: {score}")
+        
+        if score > best_score:
+            best_score = score
+            patience_counter = 0
+            torch.save(predictor.model.state_dict(), os.path.join(args.output_dir, "sam2model.torch"))
+        # else:
+        #     patience_counter += 1
+        #     if patience_counter >= args.patience_epochs:
+        #         print(f"Early stopping at epoch {epoch} due to no improvement.")
+        #         break
+        scores[f"epoch_{epoch}_iou"] = best_score
+        
         if isinstance(scheduler, ReduceLROnPlateau):
-            scheduler.step(epoch_loss)
+            scheduler.step(score)
         elif scheduler:
             scheduler.step()
+        
+        if time.time() - start_time > max_time:
+            print(f"Time limit of {max_time} seconds reached. Stopping training early.")
+            break  # Exit the loop when time limit is reached
 
-    torch.save(predictor.model.state_dict(), os.path.join(args.output_dir, "sam2model.torch"))
     avg_iou /= args.num_train_epochs
     avg_loss /= args.num_train_epochs
     cost = time.time() - start_time
 
     report = {
         "dataset": args.dataset_name,
-        "score": avg_iou,
+        "score": best_score,
         "cost": cost
     }
-    if return_model:
-        return predictor.model
     if args.return_scores_per_epoch:
         return report, scores
     return report

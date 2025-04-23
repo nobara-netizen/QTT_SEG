@@ -13,7 +13,7 @@ echo "Running job $SLURM_JOB_NAME using $SLURM_JOB_CPUS_PER_NODE cpus per node w
 
 # Check GPU allocation
 echo "Running Benchmark pipeline..."
-python -m benchmarks.gluon_tests
+python -m benchmarks.gluon_test_binary
 
 # Print some Information about the end-time to STDOUT
 echo "DONE";

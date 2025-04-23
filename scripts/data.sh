@@ -14,7 +14,7 @@ echo "Running job $SLURM_JOB_NAME using $SLURM_JOB_CPUS_PER_NODE cpus per node w
 # Check GPU allocation
 echo "Running Data Collection pipeline..."
 python -m src.finetune_wrapper.finetune_script
-
+# python -m src.finetune_wrapper.best_scores
 # Print some Information about the end-time to STDOUT
 echo "DONE";
 echo "Finished at $(date)";

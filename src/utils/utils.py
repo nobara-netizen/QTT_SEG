@@ -11,55 +11,138 @@ import random
 import numpy as np
 import torch
 
+TARGET_MODULES_DICT = {
+    "modules" :["sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
+    "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
+    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+    "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
+    "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
+    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
+    "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj",
+    "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj"]
+}
+
+# TARGET_MODULES_DICT = {
+#     "modules" : [
+#     "mask_decoder.transformer.layers.0.self_attn.q_proj",
+#     "mask_decoder.transformer.layers.0.self_attn.v_proj",
+#     "mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
+#     "mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
+#     "mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
+#     "mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
+#     "mask_decoder.transformer.layers.1.self_attn.q_proj",
+#     "mask_decoder.transformer.layers.1.self_attn.v_proj",
+#     "mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
+#     "mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
+#     "mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
+#     "mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
+#     "mask_decoder.transformer.final_attn_token_to_image.q_proj",
+#     "mask_decoder.transformer.final_attn_token_to_image.v_proj",
+#     ]
+# }
+
+
+def get_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_name", default="building", type=str, help="Dataset Name")
+    parser.add_argument("--seed", default=0, type=int, help="Seed for sampling")
+    parser.add_argument("--output_dir", default="./outputs", type=str, help="Output path")
+    parser.add_argument("--num_train_epochs", default=10, type=int, help="Number of training epochs")
+    parser.add_argument("--num_prompts", default=64, type=int, help="Number of training prompts")
+    parser.add_argument('--return_scores_per_epoch', action='store_true', help="Return scores per epoch")
+
+    # Hyperparameters
+    parser.add_argument("--lr", default=1e-4, type=float, 
+                        help="Initial learning rate")
+    parser.add_argument("--weight_decay", default=1e-5, type=float, 
+                        help="Weight decay (L2 regularization)")
+
+    # LoRA Hyperparameters
+    parser.add_argument("--lora", default=1, type=int, choices=[0, 1], help="Enable LoRA")
+    parser.add_argument("--lora_targets",type=str,default="modules",help="Choose which attention modules to apply LoRA to: 'self_attn', or 'cross_attn'.")
+    parser.add_argument("--lora_rank", default=8, type=int, help="LoRA rank")
+    parser.add_argument("--lora_dropout", default=0.1, type=float, help="LoRA Dropout")
+
+    # Optimizer arguments
+    parser.add_argument("--opt", default="adam", help="Optimizer type")
+    parser.add_argument("--opt_betas", type=eval, default=(0.9, 0.999), 
+                        help="Betas for Adam/AdamW (Tuple)")
+
+    # Scheduler arguments
+    parser.add_argument("--sched", choices=["cosine", "plateau","onecycle"], 
+                        default="cosine", help="Learning rate scheduler")
+    parser.add_argument("--decay_rate", default=0.1, type=float, 
+                        help="Decay rate")
+    parser.add_argument("--patience_epochs", default=1, type=int, help="Patience epochs for plateau scheduler")
+
+    # Augmentation Hyperparameters
+    parser.add_argument("--horizontal_flip", default=0, type=int, choices=[0, 1], help="Enable horizontal flip augmentation")
+    parser.add_argument("--vertical_flip", default=0, type=int, choices=[0, 1], help="Enable vertical flip augmentation")
+    parser.add_argument("--random_rotate", default=0, type=int, choices=[0, 1], help="Enable random rotation augmentation")
+
+    return parser
+
+
 def get_config_space():
     cs = ConfigurationSpace("cv-segmentation")
     # Seed
-    rs = OrdinalHyperparameter("seed", [1, 7, 42, 99, 123, 256, 512, 1024, 1337, 2024, 3000, 31415, 54321, 65536, 99999])
-    # Learning rate and weight decay
-    lr = OrdinalHyperparameter("learning_rate", [0.0001, 0.00001, 0.000001])
-    wd = OrdinalHyperparameter("weight_decay", [1e-4, 1e-5])
+    # Seed: include a few stable and reproducible ones
+    rs = OrdinalHyperparameter("seed", [0, 42, 1337])
 
-    # Model selection
-    model = Categorical("model_name", ["SAM1", "SAM2"])
+    # Prompts: fine-grained range that covers typical usage
+    ps = OrdinalHyperparameter("num_prompts", [64, 128, 256, 512])
 
-    # LoRA hyperparameters
-    lora = OrdinalHyperparameter("lora", [0, 1])  # Matches default setting
-    lora_rank = OrdinalHyperparameter("lora_rank", [4, 8])
-    lora_dropout = OrdinalHyperparameter("lora_dropout", [0.1, 0.2, 0.3])
+    # Learning rate: narrower, empirically strong for fine-tuning transformers
+    lr = OrdinalHyperparameter("lr", [5e-5, 1e-4, 3e-4,1e-3])
 
-    # Augmentation hyperparameters
+    # Weight decay: use small values to regularize without killing performance
+    wd = OrdinalHyperparameter("weight_decay", [0.0, 1e-5, 5e-5, 1e-4])
+
+    # Model choices
+    model = Categorical("model_name", ["SAM2"])
+
+    # LoRA: enabled with sensible defaults
+    lora = OrdinalHyperparameter("lora", [0,1])
+    lora_rank = OrdinalHyperparameter("lora_rank", [8, 16, 32])
+    lora_dropout = OrdinalHyperparameter("lora_dropout", [0.0, 0.1])
+    lora_targets = Categorical("lora_targets", ["modules"])
+
+    # Augmentations: usually helpful, especially on small datasets
     horizontal_flip = OrdinalHyperparameter("horizontal_flip", [0, 1])
     vertical_flip = OrdinalHyperparameter("vertical_flip", [0, 1])
     random_rotate = OrdinalHyperparameter("random_rotate", [0, 1])
-    elastic_transform = OrdinalHyperparameter("elastic_transform", [0, 1])
-    normalize = OrdinalHyperparameter("normalize", [0, 1])
 
-    # Optimizer arguments
-    opt = Categorical("opt", ["sgd", "adam", "adamw", "rmsprop"])
-    momentum = OrdinalHyperparameter("momentum", [0.8, 0.9])
-    opt_betas = Categorical("opt_betas", [(0.9, 0.999), (0.85, 0.995), (0.8, 0.9)])
+    # Optimizer: AdamW is best for transformers, rest as fallbacks
+    opt = Categorical("opt", ["adamw", "adam"])
+    opt_betas = Categorical("opt_betas", [(0.9, 0.999)])
 
-    # Scheduler arguments
+    # Scheduler: cosine and onecycle are well-tested for segmentation
     sched = Categorical("sched", ["cosine", "onecycle", "plateau"])
-    decay_epochs = OrdinalHyperparameter("decay_epochs", [30, 60, 90])
-    decay_rate = OrdinalHyperparameter("decay_rate", [0.1, 0.3, 0.5])
-    patience_epochs = OrdinalHyperparameter("patience_epochs", [5])
+    decay_rate = OrdinalHyperparameter("decay_rate", [0.1])
+    patience_epochs = OrdinalHyperparameter("patience_epochs", [5, 3])
 
-    # LoRA Targets - Conditional on model_name
-    lora_targets_sam1 = Categorical("lora_targets_sam1", ["attn", "self_attn", "cross_attn"])
-    lora_targets_sam2 = Categorical("lora_targets_sam2", ["image_enc_attn", "image_enc_mlp", "memory_self_attn", "memory_cross_attn"])
+    # Add all hyperparameters to config space
+    cs.add_hyperparameters([
+        rs, ps, lr, wd, model, lora, lora_rank, lora_dropout, lora_targets,
+        horizontal_flip, vertical_flip, random_rotate,
+        opt, opt_betas, sched, decay_rate, patience_epochs,
+    ])
+
+    return cs
+
 
     # Add hyperparameters to configuration space
     cs.add_hyperparameters([
-        rs, lr, wd, model, lora, lora_rank, lora_dropout,
-        horizontal_flip, vertical_flip, random_rotate, elastic_transform, normalize,
-        opt, momentum, opt_betas, sched, decay_epochs, decay_rate, patience_epochs,
-        lora_targets_sam1, lora_targets_sam2
+        rs, ps, lr, wd, model, lora, lora_rank, lora_dropout,lora_targets,
+        horizontal_flip, vertical_flip, random_rotate,
+        opt, opt_betas, sched, decay_epochs, decay_rate, patience_epochs,
     ])
-
-    # Conditional Dependencies
-    cs.add_condition(EqualsCondition(lora_targets_sam1, model, "SAM1"))
-    cs.add_condition(EqualsCondition(lora_targets_sam2, model, "SAM2"))
 
     return cs
 
@@ -82,6 +165,4 @@ def set_seed(seed):
     torch.manual_seed(seed)  
     torch.cuda.manual_seed(seed) 
     torch.cuda.manual_seed_all(seed)  
-    torch.backends.cudnn.deterministic = True  
-    torch.backends.cudnn.benchmark = False 
 

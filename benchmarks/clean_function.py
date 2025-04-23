@@ -2,7 +2,7 @@ import os
 import shutil
 import kagglehub
 from segmentation_models_pytorch.datasets import SimpleOxfordPetDataset
-
+import rarfile
 
 def delete_items(starting_with="kos", directory="."):
     """
@@ -29,7 +29,6 @@ def delete_items(starting_with="kos", directory="."):
 
 if __name__ == "__main__":
 
-    # Download latest version
-    path = kagglehub.dataset_download("abdallahalidev/plantvillage-dataset")
+    path = kagglehub.dataset_download("fakhrealam9537/leaf-disease-segmentation-dataset")
 
     print("Path to dataset files:", path)
