@@ -21,16 +21,24 @@ from src.sam2_process.sam2_test import test
 from src.data.custom_dataloader import CustomDataset
 from src.utils.utils import get_config_space
 
+meta_file_path = "/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam_train.csv"
+perf_predictor_path = "/home/dasb/.cache/qtt_new/PerfPredictor/"
+cost_predictor_path = "/home/dasb/.cache/qtt_new/CostPredictor/"
 output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
+results_csv_path = "results.csv"
+
+qtt_logs_path =  Path("/home/dasb/workspace/QTT_SEG/qtt/")
+qtt_states_path = Path("/work/dlclarge2/dasb-Camvid/qtt_states/")
+
+train_predictors = False
 time_budgets = [180, 360, 540]
 dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building"]
-results_csv_path = "results.csv"
 
 def delete_folders():
     print("Flushing stale files...")
     folder_paths = [
-        Path("/home/dasb/workspace/QTT_SEG/qtt"),
-        Path(f"/work/dlclarge2/dasb-Camvid/qtt_states"),
+        qtt_logs_path,
+        qtt_states_path,
         Path(output_path)  
     ]
     for folder_path in folder_paths:
@@ -46,11 +54,7 @@ def delete_folders():
 
 
 if __name__ == "__main__":
-    
-    train_predictors = False
-    perf_predictor_path = "/home/dasb/.cache/qtt_new/PerfPredictor/"
-    cost_predictor_path = "/home/dasb/.cache/qtt_new/CostPredictor/"
-    meta_df = pd.read_csv("/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam_train.csv")
+    meta_df = pd.read_csv(meta_file_path)
     
     meta_df = meta_df.drop(["num_prompts"], axis=1)
     cost = meta_df["cost"]
@@ -89,7 +93,7 @@ if __name__ == "__main__":
             patience=5,
             tol=0.001,
             refit=False,
-            path=f"/work/dlclarge2/dasb-Camvid/qtt_states/{uuid.uuid4().hex}",
+            path=f"{qtt_states_path}{uuid.uuid4().hex}",
             seed=seed,
             verbosity = -1 
         )
