@@ -10,154 +10,161 @@ from ConfigSpace import (
 import random
 import numpy as np
 import torch
-
-TARGET_MODULES_DICT = {
-    "modules" :["sam_mask_decoder.transformer.layers.0.self_attn.q_proj",
-    "sam_mask_decoder.transformer.layers.0.self_attn.v_proj",
-    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
-    "sam_mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
-    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
-    "sam_mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
-    "sam_mask_decoder.transformer.layers.1.self_attn.q_proj",
-    "sam_mask_decoder.transformer.layers.1.self_attn.v_proj",
-    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
-    "sam_mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
-    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
-    "sam_mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
-    "sam_mask_decoder.transformer.final_attn_token_to_image.q_proj",
-    "sam_mask_decoder.transformer.final_attn_token_to_image.v_proj"]
-}
-
-# TARGET_MODULES_DICT = {
-#     "modules" : [
-#     "mask_decoder.transformer.layers.0.self_attn.q_proj",
-#     "mask_decoder.transformer.layers.0.self_attn.v_proj",
-#     "mask_decoder.transformer.layers.0.cross_attn_token_to_image.q_proj",
-#     "mask_decoder.transformer.layers.0.cross_attn_token_to_image.v_proj",
-#     "mask_decoder.transformer.layers.0.cross_attn_image_to_token.q_proj",
-#     "mask_decoder.transformer.layers.0.cross_attn_image_to_token.v_proj",
-#     "mask_decoder.transformer.layers.1.self_attn.q_proj",
-#     "mask_decoder.transformer.layers.1.self_attn.v_proj",
-#     "mask_decoder.transformer.layers.1.cross_attn_token_to_image.q_proj",
-#     "mask_decoder.transformer.layers.1.cross_attn_token_to_image.v_proj",
-#     "mask_decoder.transformer.layers.1.cross_attn_image_to_token.q_proj",
-#     "mask_decoder.transformer.layers.1.cross_attn_image_to_token.v_proj",
-#     "mask_decoder.transformer.final_attn_token_to_image.q_proj",
-#     "mask_decoder.transformer.final_attn_token_to_image.v_proj",
-#     ]
-# }
-
+import matplotlib.pyplot as plt
 
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name", default="building", type=str, help="Dataset Name")
-    parser.add_argument("--seed", default=0, type=int, help="Seed for sampling")
     parser.add_argument("--output_dir", default="./outputs", type=str, help="Output path")
     parser.add_argument("--num_train_epochs", default=10, type=int, help="Number of training epochs")
-    parser.add_argument("--num_prompts", default=64, type=int, help="Number of training prompts")
     parser.add_argument('--return_scores_per_epoch', action='store_true', help="Return scores per epoch")
 
     # Hyperparameters
-    parser.add_argument("--lr", default=1e-4, type=float, 
-                        help="Initial learning rate")
-    parser.add_argument("--weight_decay", default=1e-5, type=float, 
-                        help="Weight decay (L2 regularization)")
+    parser.add_argument("--lr", default=1e-5, type=float, help="Initial learning rate")
+    parser.add_argument("--weight_decay", default=5e-4, type=float, help="Weight decay (L2 regularization)")
 
     # LoRA Hyperparameters
-    parser.add_argument("--lora", default=1, type=int, choices=[0, 1], help="Enable LoRA")
-    parser.add_argument("--lora_targets",type=str,default="modules",help="Choose which attention modules to apply LoRA to: 'self_attn', or 'cross_attn'.")
+    parser.add_argument("--lora", default=0, type=int, choices=[0, 1], help="Enable LoRA")
+    parser.add_argument("--lora_targets", type=str, default="modules", help="Choose which attention modules to apply LoRA to: 'self_attn', or 'cross_attn'.")
     parser.add_argument("--lora_rank", default=8, type=int, help="LoRA rank")
-    parser.add_argument("--lora_dropout", default=0.1, type=float, help="LoRA Dropout")
+    parser.add_argument("--lora_dropout", default=0, type=float, help="LoRA Dropout")
 
     # Optimizer arguments
     parser.add_argument("--opt", default="adam", help="Optimizer type")
-    parser.add_argument("--opt_betas", type=eval, default=(0.9, 0.999), 
-                        help="Betas for Adam/AdamW (Tuple)")
+    parser.add_argument("--opt_betas", type=eval, default=(0.9, 0.999), help="Betas for Adam/AdamW (Tuple)")
 
     # Scheduler arguments
-    parser.add_argument("--sched", choices=["cosine", "plateau","onecycle"], 
-                        default="cosine", help="Learning rate scheduler")
-    parser.add_argument("--decay_rate", default=0.1, type=float, 
-                        help="Decay rate")
-    parser.add_argument("--patience_epochs", default=1, type=int, help="Patience epochs for plateau scheduler")
+    parser.add_argument("--sched", choices=["cosine", "cosine_warm", "step", "plateau", "onecycle", "poly"], 
+                        default="onecycle", help="Learning rate scheduler")
+    parser.add_argument("--decay_rate", default=0.5, type=float, help="Decay rate (e.g., for plateau/step schedulers)")
+    parser.add_argument("--patience_epochs", default=0, type=int, help="Patience epochs for plateau scheduler")
+
+    # CosineAnnealingWarmRestarts specific
+    parser.add_argument("--cosine_t0", default=5, type=int, help="T_0 for CosineAnnealingWarmRestarts")
+    parser.add_argument("--cosine_t_mult", default=1, type=int, help="T_mult for CosineAnnealingWarmRestarts")
+
+    # OneCycleLR specific
+    parser.add_argument("--onecycle_pct_start", default=0.1, type=float, help="pct_start for OneCycleLR")
+    parser.add_argument("--onecycle_div_factor", default=100.0, type=float, help="div_factor for OneCycleLR")
+    parser.add_argument("--onecycle_final_div_factor", default=10.0, type=float, help="final_div_factor for OneCycleLR")
+
+    # StepLR specific
+    parser.add_argument("--step_size", default=5, type=int, help="Step size for StepLR")
+
+    # PolynomialLR specific
+    parser.add_argument("--poly_power", default=0.9, type=float, help="Power for PolynomialLR")
 
     # Augmentation Hyperparameters
-    parser.add_argument("--horizontal_flip", default=0, type=int, choices=[0, 1], help="Enable horizontal flip augmentation")
-    parser.add_argument("--vertical_flip", default=0, type=int, choices=[0, 1], help="Enable vertical flip augmentation")
-    parser.add_argument("--random_rotate", default=0, type=int, choices=[0, 1], help="Enable random rotation augmentation")
+    parser.add_argument("--horizontal_flip", default=1, type=int, choices=[0, 1], help="Enable horizontal flip augmentation")
+    parser.add_argument("--vertical_flip", default=1, type=int, choices=[0, 1], help="Enable vertical flip augmentation")
+    parser.add_argument("--random_rotate", default=1, type=int, choices=[0, 1], help="Enable random rotation augmentation")
 
     return parser
 
 
 def get_config_space():
     cs = ConfigurationSpace("cv-segmentation")
-    # Seed
-    # Seed: include a few stable and reproducible ones
-    rs = OrdinalHyperparameter("seed", [0, 42, 1337])
 
-    # Prompts: fine-grained range that covers typical usage
-    ps = OrdinalHyperparameter("num_prompts", [64, 128, 256, 512])
+    # Learning rate
+    lr = OrdinalHyperparameter("lr", [
+    1e-05, 1.2e-05, 1.5e-05, 2e-05, 2.5e-05, 3.5e-05, 5e-05, 6e-05, 6.5e-05,
+    0.0001, 0.00012, 0.00018, 0.00025, 0.00032, 0.0004, 0.00048, 0.0005, 0.00055,
+    0.0008, 0.001, 0.0015, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007
+])
 
-    # Learning rate: narrower, empirically strong for fine-tuning transformers
-    lr = OrdinalHyperparameter("lr", [5e-5, 1e-4, 3e-4,1e-3])
-
-    # Weight decay: use small values to regularize without killing performance
+    # Weight decay
     wd = OrdinalHyperparameter("weight_decay", [0.0, 1e-5, 5e-5, 1e-4])
 
-    # Model choices
-    model = Categorical("model_name", ["SAM2"])
-
-    # LoRA: enabled with sensible defaults
-    lora = OrdinalHyperparameter("lora", [0,1])
-    lora_rank = OrdinalHyperparameter("lora_rank", [8, 16, 32])
+    # LoRA
+    lora = OrdinalHyperparameter("lora", [0, 1])
+    lora_rank = OrdinalHyperparameter("lora_rank", [4, 8, 16])
     lora_dropout = OrdinalHyperparameter("lora_dropout", [0.0, 0.1])
     lora_targets = Categorical("lora_targets", ["modules"])
 
-    # Augmentations: usually helpful, especially on small datasets
+    # Augmentations
     horizontal_flip = OrdinalHyperparameter("horizontal_flip", [0, 1])
     vertical_flip = OrdinalHyperparameter("vertical_flip", [0, 1])
     random_rotate = OrdinalHyperparameter("random_rotate", [0, 1])
 
-    # Optimizer: AdamW is best for transformers, rest as fallbacks
+    # Optimizer
     opt = Categorical("opt", ["adamw", "adam"])
     opt_betas = Categorical("opt_betas", [(0.9, 0.999)])
 
-    # Scheduler: cosine and onecycle are well-tested for segmentation
-    sched = Categorical("sched", ["cosine", "onecycle", "plateau"])
-    decay_rate = OrdinalHyperparameter("decay_rate", [0.1])
-    patience_epochs = OrdinalHyperparameter("patience_epochs", [5, 3])
+    # Scheduler
+    sched = Categorical("sched", ["cosine", "onecycle", "plateau", "cosine_warm", "step", "poly"])
+    decay_rate = OrdinalHyperparameter("decay_rate", [0.1, 0.5, 0.8])
+    patience_epochs = OrdinalHyperparameter("patience_epochs", [0, 1, 2])
+
+    # --- Additional scheduler-specific hyperparameters ---
+
+    # CosineWarmRestarts
+    cosine_t0 = OrdinalHyperparameter("cosine_t0", [2, 3, 5])
+    cosine_t_mult = OrdinalHyperparameter("cosine_t_mult", [1, 2])
+
+    # OneCycleLR
+    onecycle_pct_start = OrdinalHyperparameter("onecycle_pct_start",[0.030, 0.035, 0.040, 0.045, 0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095, 0.100])
+    onecycle_div_factor = OrdinalHyperparameter("onecycle_div_factor", [10, 15, 20, 25, 30, 40, 50, 65, 80, 100])
+    onecycle_final_div_factor = OrdinalHyperparameter("onecycle_final_div_factor", [10, 20, 40, 80, 160, 320, 640, 1000])
+
+    # StepLR
+    step_size = OrdinalHyperparameter("step_size", [3, 5])
+
+    # PolynomialLR
+    poly_power = OrdinalHyperparameter("poly_power",[0.9, 0.5, 1.0])
 
     # Add all hyperparameters to config space
     cs.add_hyperparameters([
-        rs, ps, lr, wd, model, lora, lora_rank, lora_dropout, lora_targets,
+        lr, wd,
+        lora, lora_rank, lora_dropout, lora_targets,
         horizontal_flip, vertical_flip, random_rotate,
         opt, opt_betas, sched, decay_rate, patience_epochs,
+        cosine_t0, cosine_t_mult,
+        onecycle_pct_start, onecycle_div_factor, onecycle_final_div_factor,
+        step_size, poly_power
     ])
 
     return cs
 
-
-    # Add hyperparameters to configuration space
-    cs.add_hyperparameters([
-        rs, ps, lr, wd, model, lora, lora_rank, lora_dropout,lora_targets,
-        horizontal_flip, vertical_flip, random_rotate,
-        opt, opt_betas, sched, decay_epochs, decay_rate, patience_epochs,
-    ])
-
-    return cs
-
-def plot_graph(loss_array, y_label, filename="loss_graph.png"):
-    cma = np.cumsum(loss_array) / (np.arange(len(loss_array)) + 1)    
-    plt.plot(loss_array, label="Curve", color="blue")    
-    plt.plot(cma, label="CMA", color="orange", linestyle='--')    
-    plt.xlabel("Epochs")
-    plt.ylabel(y_label)
-    plt.title("Cumulative Moving Average vs Epochs")
+def plot_training_metrics(train_loss, train_iou, test_iou, save_path='training_metrics.png'):
+    """
+    Plots training loss, training IOU, and test IOU over epochs, and saves the plot to a file.
     
-    plt.legend()
+    Args:
+        train_loss (list of float): Training loss per epoch
+        train_iou (list of float): Training IOU per epoch
+        test_iou (list of float): Test IOU per epoch
+        save_path (str): Path to save the output plot image
+    """
+    epochs = range(1, len(train_loss) + 1)
+    
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Plot training loss on the left y-axis
+    ax1.plot(epochs, train_loss, 'r-', label='Train Loss')
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Train Loss', color='r')
+    ax1.tick_params(axis='y', labelcolor='r')
+
+    # Create a second y-axis for IOU
+    ax2 = ax1.twinx()
+    ax2.plot(epochs, train_iou, 'g--', label='Train IOU')
+    ax2.plot(epochs, test_iou, 'b-.', label='Test IOU')
+    ax2.set_ylabel('IOU', color='b')
+    ax2.tick_params(axis='y', labelcolor='b')
+
+    # Combine legends from both axes
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax2.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right')
+
+    plt.title('Training Metrics Over Epochs')
     plt.grid(True)
-    plt.savefig(filename)
+    plt.tight_layout()
+
+    # Save the figure
+    plt.savefig(save_path)
     plt.close()
+    print(f"Plot saved to {save_path}")
 
 def set_seed(seed):
     random.seed(seed) 

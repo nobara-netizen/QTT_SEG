@@ -7,7 +7,10 @@ costpredictor
 perfpredictor
 *.csv
 logs
-quicktunetool/*
+quicktunetool
+benchmarks
+outputs
+
 # macOS system files
 .DS_Store
 .AppleDouble

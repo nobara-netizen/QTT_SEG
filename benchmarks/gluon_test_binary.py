@@ -7,13 +7,12 @@ from PIL import Image
 import numpy as np
 
 if __name__ == "__main__":
-    time_budgets = [180, 360, 540, 720, 900]
-    dataset_names =  ["building"]
+    time_budgets = [180, 360, 540]
+    dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building"]
     benchmark_file = "benchmarks/gluon_iters.csv"
     if not os.path.exists(benchmark_file):
         pd.DataFrame(columns=["dataset_name", "time_budget", "score"]).to_csv(benchmark_file, index=False)
 
-    
     for dataset_name in dataset_names:
         for time_budget in time_budgets:
             train_data = pd.read_csv(f"benchmarks/dataframes/{dataset_name}_train.csv")[:100]
@@ -34,7 +33,6 @@ if __name__ == "__main__":
             )
             predictor.fit(
                 train_data=train_data,
-                tuning_data=test_data,
                 time_limit=time_budget,
             )
 

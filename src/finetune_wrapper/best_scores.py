@@ -4,8 +4,9 @@ from src.utils.utils import get_parser
 import pandas as pd
 import os
 
+# forest, flood, vineyard doesnt work on autogluon
 
-time_budgets = [180]
+time_budgets = [540]
 best_scores_path = "SAM2_best_for_results.csv"
 
 parser = get_parser() 

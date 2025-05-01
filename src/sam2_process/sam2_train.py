@@ -11,172 +11,221 @@ from statistics import mean
 from torch.utils.data import Dataset, DataLoader, Subset
 import torch
 from torch.optim import SGD, Adam, AdamW, RMSprop
-from torch.optim.lr_scheduler import CosineAnnealingLR, ReduceLROnPlateau, OneCycleLR
+from torch.optim.lr_scheduler import (
+    CosineAnnealingLR,
+    CosineAnnealingWarmRestarts, 
+    ReduceLROnPlateau, 
+    OneCycleLR,
+    StepLR,
+    PolynomialLR
+)
 import torch.nn as nn
-from peft import get_peft_model, LoraConfig
+from peft import get_peft_model, LoraConfig, TaskType
 import matplotlib.pyplot as plt
 from torch.cuda.amp import autocast
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from src.data.custom_dataloader import CustomDataset
 from src.sam2_process.sam2_test import test
-from src.utils.utils import TARGET_MODULES_DICT, get_parser, set_seed
+from src.utils.utils import get_parser, plot_training_metrics
 import random
 from transformers import SamProcessor
 import math
+from torchmetrics.classification import JaccardIndex
+import contextlib
+import os
+import sys
 
 sam2_checkpoint = "third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt"
 model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
 
+class BCEDiceLoss(nn.Module):
+    def __init__(self):
+        super(BCEDiceLoss, self).__init__()
+        self.bce = nn.BCEWithLogitsLoss()
 
-def main(args, return_model=False):
+    def forward(self, inputs, targets):
+        bce_loss = self.bce(inputs, targets)
+        inputs = torch.sigmoid(inputs)
+        smooth = 1e-5
+        intersection = (inputs * targets).sum()
+        dice_loss = 1 - (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        return bce_loss + dice_loss
+
+def numpy_collate(batch):
+    return batch  
+
+def main(args, max_time=10**18):
+    best_score = -float("inf")
+    test_score = 0
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
-        
-    train_dataset = CustomDataset(
-        dataset_name = args.dataset_name, 
-        processor = processor,
-        train=True,
-        resize_mask = False,
-        args=args
-        )    
+    jaccard = JaccardIndex(task="binary").to(device)
+    output_dir = os.path.join(args.output_dir, "sam2model.torch")
+    
+    train_dataset = CustomDataset(dataset_name=args.dataset_name, split="train", args=args)
+    train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True, collate_fn=numpy_collate)
+    
     sam2_model = build_sam2(model_cfg, sam2_checkpoint, device=device) 
     predictor = SAM2ImagePredictor(sam2_model)
 
-    
     if args.lora:
         lora_config = LoraConfig(
-            target_modules= TARGET_MODULES_DICT[args.lora_targets],  
-            r=args.lora_rank,  
-            lora_alpha=2 * args.lora_rank,  
-            lora_dropout=args.lora_dropout,  
+            r=args.lora_rank,
+            lora_alpha=2 * args.lora_rank,
+            target_modules=["attn.qkv", "mlp.layers.0", "mlp.layers.1"],
+            lora_dropout=args.lora_dropout,
+            bias="none",
+            task_type=TaskType.FEATURE_EXTRACTION
         )
         peft_model = get_peft_model(sam2_model, lora_config)
         predictor.model = peft_model
+        for name, param in predictor.model.named_parameters():
+            if "mask_decoder" in name or "prompt_encoder" in name:
+                param.requires_grad = True
     else:
         for param in predictor.model.parameters():
             param.requires_grad = False
         for name, param in predictor.model.named_parameters():
-            if "mask_decoder" in name:
+            if "mask_decoder" in name or "prompt_encoder" in name:
                 param.requires_grad = True
-                
 
-    # Step 3: Confirm which parameters are trainable
-    print("Trainable parameters:")
-    for name, param in predictor.model.named_parameters():
-        if param.requires_grad:
-            print(name)
-
-    # Step 4: Create optimizer using only trainable params
     optimizer = torch.optim.AdamW(
         params=filter(lambda p: p.requires_grad, predictor.model.parameters()),
         lr=args.lr,
         weight_decay=args.weight_decay
     )
-    steps_per_epoch = math.ceil(len(train_dataset) / 1)
+
+    steps_per_epoch = len(train_loader)
     scheduler_cls = {
-        "cosine": lambda opt: CosineAnnealingLR(opt, T_max=args.num_train_epochs),
+        "cosine_warm": lambda opt: CosineAnnealingWarmRestarts(
+            opt, T_0=args.cosine_t0, T_mult=args.cosine_t_mult, eta_min=args.lr / 10
+        ),
+        "cosine": lambda opt: CosineAnnealingLR(
+            opt, T_max=args.num_train_epochs, eta_min=args.lr / 10
+        ),
         "plateau": lambda opt: ReduceLROnPlateau(
-            opt, mode="min", patience=args.patience_epochs, factor=args.decay_rate
+            opt, mode="max", patience=args.patience_epochs, factor=args.decay_rate
         ),
         "onecycle": lambda opt: OneCycleLR(
-            opt, max_lr=args.lr, epochs=args.num_train_epochs, steps_per_epoch=steps_per_epoch
+            opt,
+            max_lr=args.lr,
+            steps_per_epoch=steps_per_epoch,
+            epochs=args.num_train_epochs,
+            pct_start=args.onecycle_pct_start,
+            div_factor=args.onecycle_div_factor,
+            final_div_factor=args.onecycle_final_div_factor,
+            anneal_strategy='cos'
+        ),
+        "step": lambda opt: StepLR(
+            opt, step_size=args.step_size, gamma=args.decay_rate, last_epoch=-1
+        ),
+        "poly": lambda opt: PolynomialLR(
+            opt, total_iters=args.num_train_epochs * steps_per_epoch, power=args.poly_power
         )
     }.get(args.sched)
 
     scheduler = scheduler_cls(optimizer) if scheduler_cls else None
-    scaler = torch.cuda.amp.GradScaler()
-    loss_fn = torch.nn.BCEWithLogitsLoss()
-    output_dir = "output_masks_sam2"
-    os.makedirs(output_dir, exist_ok=True)
 
-    scores = {}
+    loss_fn = BCEDiceLoss()
+    lc = {}
+    train_loss = []
+    train_iou = []
+    val_iou = []
+
+    predictor.model.train()
     start_time = time.time()
 
     for epoch in range(args.num_train_epochs):
-        batch_iou = epoch_iou = avg_iou = 0
-        batch_loss = epoch_loss = avg_loss = 0
+        batch_iou = batch_loss = 0
 
-        for _, batch in tqdm(enumerate(train_dataset), total=len(train_dataset), desc="Training Progress", leave=True):
-            with torch.cuda.amp.autocast():
-                if len(batch) == 0:
-                    continue
-                image, mask, input_point, input_label = batch["pixel_values"], batch["ground_truth_mask"], batch["input_points"], batch["input_labels"]
+        for i, batch in tqdm(enumerate(train_loader), total=len(train_loader), desc="Training Progress", leave=True):
+            sample = batch[0]
+            if len(batch) == 0:
+                continue
 
-                predictor.set_image(image)
+            image, mask, input_box = sample["pixel_values"], sample["ground_truth_mask"], sample["input_box"]
+            predictor.set_image(image)
 
-                # Prompt encoding
-                mask_input, unnorm_coords, labels, unnorm_box = predictor._prep_prompts(
-                    point_coords=input_point, point_labels=input_label, box=None, mask_logits=None, normalize_coords=True
-                )
-                sparse_embeddings, dense_embeddings = predictor.model.sam_prompt_encoder(
-                    points=(unnorm_coords, labels), boxes=None, masks=None
-                )
+            mask_input, unnorm_coords, labels, unnorm_box = predictor._prep_prompts(
+                point_coords=None, point_labels=None, box=input_box, mask_logits=None, normalize_coords=True
+            )
+            sparse_embeddings, dense_embeddings = predictor.model.sam_prompt_encoder(
+                points=None, boxes=unnorm_box, masks=None
+            )
 
-                # Mask decoder
-                batched_mode = unnorm_coords.shape[0] > 1  # Multi-object prediction
-                high_res_features = [feat_level[-1].unsqueeze(0) for feat_level in predictor._features["high_res_feats"]]
-                low_res_masks, prd_scores, _, _ = predictor.model.sam_mask_decoder(
-                    image_embeddings=predictor._features["image_embed"][-1].unsqueeze(0),
-                    image_pe=predictor.model.sam_prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=True,
-                    repeat_image=batched_mode,
-                    high_res_features=high_res_features,
-                )
-                prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
+            batched_mode = unnorm_box.shape[0] > 1
+            high_res_features = [feat_level[-1].unsqueeze(0) for feat_level in predictor._features["high_res_feats"]]
+            low_res_masks, prd_scores, _, _ = predictor.model.sam_mask_decoder(
+                image_embeddings=predictor._features["image_embed"][-1].unsqueeze(0),
+                image_pe=predictor.model.sam_prompt_encoder.get_dense_pe(),
+                sparse_prompt_embeddings=sparse_embeddings,
+                dense_prompt_embeddings=dense_embeddings,
+                multimask_output=True,
+                repeat_image=batched_mode,
+                high_res_features=high_res_features,
+            )
 
-                gt_mask = torch.tensor(mask).unsqueeze(0).float().to(device)
-                prd_mask = torch.sigmoid(prd_masks[:, 0])
+            prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
+            gt_mask = torch.tensor(mask).unsqueeze(0).float().to(device)
 
-                loss = (-gt_mask * torch.log(prd_mask + 1e-5) - (1 - gt_mask) * torch.log((1 - prd_mask) + 1e-5)).mean()
-                
-                # loss = loss_fn(prd_mask, gt_mask)
-                batch_loss += loss.item()
+            loss = loss_fn(prd_masks[:, 0], gt_mask)
+            batch_loss += loss.item()
 
-                inter = (gt_mask * (prd_mask > 0.5)).sum(1).sum(1)
-                iou = inter / (gt_mask.sum(1).sum(1) + (prd_mask > 0.5).sum(1).sum(1) - inter)
-                batch_iou += iou.mean().item()
+            gt_mask_bin = gt_mask.int()
+            prd_mask_bin = (prd_masks[:, 0] > 0.5).int()
 
-                predictor.model.zero_grad()
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
+            iou = jaccard(prd_mask_bin, gt_mask_bin)
+            batch_iou += iou.mean().item()
 
-        # if time.time() - start_time > max_time:
-        #     print(f"Time limit of {max_time} seconds reached. Stopping training early.")
-        #     break  # Exit the loop when time limit is reached
+            predictor.model.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(predictor.model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            if isinstance(scheduler, (OneCycleLR, PolynomialLR)):
+                scheduler.step()
+            elif isinstance(scheduler, CosineAnnealingWarmRestarts):
+                scheduler.step(epoch + i / steps_per_epoch)
 
         epoch_iou = batch_iou / len(train_dataset)
-        avg_iou += epoch_iou
-        scores[f"epoch_{epoch}_iou"] = epoch_iou
+        train_iou.append(epoch_iou)
 
         epoch_loss = batch_loss / len(train_dataset)
-        avg_loss += epoch_loss
+        train_loss.append(epoch_loss)
 
-        score = test(args.dataset_name, zero_shot=False, predicted_model=predictor.model, args=args)
-        print(f"Epoch: {epoch} IOU: {score}")
+        val_score = test(split="val", predicted_model=predictor.model, args=args)
+        print(f"Epoch: {epoch} VAL IOU: {val_score} LR: {optimizer.param_groups[0]['lr']}")
+        val_iou.append(val_score)
+
+        if val_score > best_score:
+            best_score = val_score
+            # torch.save(predictor.model.state_dict(), output_dir)
+
+        lc[f"epoch_{epoch}_iou"] = val_score
+
         if isinstance(scheduler, ReduceLROnPlateau):
-            scheduler.step(epoch_loss)
-        elif scheduler:
+            scheduler.step(val_score)
+        elif isinstance(scheduler, (StepLR, CosineAnnealingLR)):
             scheduler.step()
 
-    torch.save(predictor.model.state_dict(), os.path.join(args.output_dir, "sam2model.torch"))
-    avg_iou /= args.num_train_epochs
-    avg_loss /= args.num_train_epochs
+        if time.time() - start_time > max_time:
+            print(f"Time limit of {max_time} seconds reached. Stopping training early.")
+            break
+
+    plot_training_metrics(train_loss, train_iou, val_iou, save_path='training_metrics.png')
+
+    avg_iou = sum(train_iou) / len(train_iou)
+    avg_loss = sum(train_loss) / len(train_loss)
     cost = time.time() - start_time
 
     report = {
         "dataset": args.dataset_name,
-        "score": avg_iou,
+        "score": test_score if test_score else best_score,
         "cost": cost
     }
-    if return_model:
-        return predictor.model
+
     if args.return_scores_per_epoch:
-        return report, scores
+        return report, lc
     return report
 
 if __name__ == "__main__":

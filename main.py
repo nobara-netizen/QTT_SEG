@@ -24,8 +24,7 @@ output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
 
 all_columns = ["DATASET","QTT_CONFIG", "QTT_TUNING_SCORE", "TIME_BUDGET","QTT_TEST_DICE", "ZERO_SHOT_DICE","TEST IMPROVEMENT"]
 time_budgets = [180, 360, 540]
-dataset_names =  ["building","forest", "vineyard","polyp", "flood", "eyes", "lesion", "tiktok", "fiber"]
-seeds = [0, 1, 7, 42, 99, 123, 256, 512, 1024, 1337, 2024, 31415, 54321, 65536, 99999]
+dataset_names =  ["building", "polyp","eyes" ,"lesion","fiber", "forest", "flood","vineyard",]
 results_csv_path = "results.csv"
 
 def delete_folders():
@@ -57,12 +56,12 @@ from ConfigSpace import (
 
 if __name__ == "__main__":
     
-    train_predictors = True
+    train_predictors = False
     perf_predictor_path = "/home/dasb/.cache/qtt_new/PerfPredictor/"
     cost_predictor_path = "/home/dasb/.cache/qtt_new/CostPredictor/"
 
-    meta_df = pd.read_csv("/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam.csv")
-
+    meta_df = pd.read_csv("/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam_train.csv")
+    meta_df = meta_df.drop(["num_prompts"], axis=1)
     cost = meta_df["cost"]
     curve = meta_df.filter(regex=r'^epoch_\d{1,2}_iou$')
     config = meta_df.drop(columns=["cost", "dataset", "opt_betas"] + curve.columns.tolist())
@@ -84,52 +83,57 @@ if __name__ == "__main__":
         cost_predictor = CostPredictor().load(cost_predictor_path)
 
     seed = 0
-    for time_budget in time_budgets:
-        for dataset_name in dataset_names:
-            delete_folders()
-            cs = get_config_space()
-            optimizer = QuickOptimizer(
-                cs,
-                max_fidelity=10,
-                perf_predictor=perf_predictor,
-                cost_predictor=cost_predictor,
-                cost_aware=True,
-                cost_factor=1.0,
-                acq_fn="ei",
-                patience=5,
-                tol=0.001,
-                refit=False,
-                path=f"/work/dlclarge2/dasb-Camvid/qtt_states/{uuid.uuid4().hex}",
-                seed=seed  
-            )
+    time_budget = 540
+    dataset_name = "building"
 
-            task_info = {
-                "dataset_name": dataset_name,
-                "output_path": output_path,
-                "seed" : seed
-            }
+    # for dataset_name in dataset_names:        
+    delete_folders()
+    cs = get_config_space()
+    optimizer = QuickOptimizer(
+        cs,
+        max_fidelity=10,
+        perf_predictor=perf_predictor,
+        cost_predictor=cost_predictor,
+        cost_aware=True,
+        cost_factor=1.0,
+        acq_fn="ei",
+        patience=5,
+        tol=0.001,
+        refit=False,
+        path=f"/work/dlclarge2/dasb-Camvid/qtt_states/{uuid.uuid4().hex}",
+        seed=seed,
+        verbosity = -1 
+    )
 
-            metafeat = get_meta_data(dataset_name)
+    task_info = {
+        "dataset_name": dataset_name,
+        "output_path": output_path,
+        "seed" : seed
+    }
 
-            print("Optimiser Setup")
-            optimizer.setup(128, metafeat)
+    metafeat = get_meta_data(dataset_name)
 
-            tuner = QuickTuner(
-                optimizer,
-                finetune_script,
-            )
+    print("Optimiser Setup")
+    optimizer.setup(128, metafeat)
 
-            traj, runtime, history = tuner.run(fevals=100, trial_info=task_info, time_budget=time_budget)
-            config_id, config, score, budget, cost, info = tuner.get_incumbent()
+    tuner = QuickTuner(
+        optimizer,
+        finetune_script,
+    )
 
-            result = {
-                "DATASET": dataset_name,
-                "SEED" : seed,
-                "QTT_CONFIG": config,
-                "QTT_TUNING_SCORE": score,
-                "TIME_BUDGET": time_budget
-            }
-            if os.path.exists(results_csv_path):
-                pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
-            else:
-                pd.DataFrame([result]).to_csv(results_csv_path, index=False)
+    # for time_budget in time_budgets:
+    traj, runtime, history = tuner.run(fevals=100, trial_info=task_info, time_budget=time_budget)
+    print(traj, runtime, history)
+    config_id, config, score, budget, cost, info = tuner.get_incumbent()
+
+    result = {
+        "DATASET": dataset_name,
+        "SEED" : seed,
+        "QTT_CONFIG": config,
+        "QTT_TUNING_SCORE": score,
+        "TIME_BUDGET": time_budget
+    }
+    if os.path.exists(results_csv_path):
+        pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
+    else:
+        pd.DataFrame([result]).to_csv(results_csv_path, index=False)

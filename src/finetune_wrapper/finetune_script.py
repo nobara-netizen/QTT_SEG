@@ -1,4 +1,4 @@
-from src.sam2_process import sam2_train2
+from src.sam2_process import sam2_train
 from src.sam1_process import sam1_train
 import argparse
 import random
@@ -46,27 +46,15 @@ def finetune_script(
     for key, value in config.items():
         args.extend([f"--{key}", str(value)])
 
-    # finetune based on model type
-    model_name = config.get("model_name", "")
     return_scores_per_epoch = trial_info.get("return_scores_per_epoch", False)
  
-    if model_name == "SAM1":
-        parser = sam1_train.get_parser()
-        args, _ = parser.parse_known_args(args)
-        if return_scores_per_epoch:
-            result, ious = sam1_train.train(args)
-        else:
-            result = sam1_train.train(args)
-    elif model_name == "SAM2":
-        parser = sam2_train2.get_parser()
-        args, _ = parser.parse_known_args(args)
-        if return_scores_per_epoch:
-            result, ious = sam2_train2.main(args)
-        else:
-            result = sam2_train2.main(args)
+    parser = sam2_train.get_parser()
+    args, _ = parser.parse_known_args(args)
+    if return_scores_per_epoch:
+        result, ious = sam2_train.main(args)
     else:
-        raise ValueError("Model Type not supported yet! Please try another type.")
-    
+        result = sam2_train.main(args)
+
     report = job.copy()
     report.update(result)
     report["status"] = True  
@@ -114,7 +102,7 @@ if __name__ == "__main__":
     i = 0
     while i <  num_configs:
         try:
-            dataset_name = np.random.choice(["building","forest", "vineyard","polyp", "flood", "eyes", "lesion", "fiber"])
+            dataset_name = np.random.choice(["leaf", "polyp", "eyes", "lesion", "fiber", "building"])
             print(dataset_name)
             config = cs.sample_configuration()
             job = {
