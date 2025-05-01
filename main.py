@@ -20,11 +20,10 @@ from src.finetune_wrapper.finetune_script import finetune_script, get_meta_data
 from src.sam2_process.sam2_test import test
 from src.data.custom_dataloader import CustomDataset
 from src.utils.utils import get_config_space
-output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
 
-all_columns = ["DATASET","QTT_CONFIG", "QTT_TUNING_SCORE", "TIME_BUDGET","QTT_TEST_DICE", "ZERO_SHOT_DICE","TEST IMPROVEMENT"]
+output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
 time_budgets = [180, 360, 540]
-dataset_names =  ["building", "polyp","eyes" ,"lesion","fiber", "forest", "flood","vineyard",]
+dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building"]
 results_csv_path = "results.csv"
 
 def delete_folders():
@@ -44,14 +43,6 @@ def delete_folders():
                 except Exception as e:
                     print(f"Failed to delete {folder}: {e}")
                     continue
-from ConfigSpace import (
-    Categorical,
-    ConfigurationSpace,
-    Constant,
-    EqualsCondition,
-    OrConjunction,
-    OrdinalHyperparameter,
-)
 
 
 if __name__ == "__main__":
@@ -59,8 +50,8 @@ if __name__ == "__main__":
     train_predictors = False
     perf_predictor_path = "/home/dasb/.cache/qtt_new/PerfPredictor/"
     cost_predictor_path = "/home/dasb/.cache/qtt_new/CostPredictor/"
-
     meta_df = pd.read_csv("/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam_train.csv")
+    
     meta_df = meta_df.drop(["num_prompts"], axis=1)
     cost = meta_df["cost"]
     curve = meta_df.filter(regex=r'^epoch_\d{1,2}_iou$')
@@ -83,57 +74,55 @@ if __name__ == "__main__":
         cost_predictor = CostPredictor().load(cost_predictor_path)
 
     seed = 0
-    time_budget = 540
-    dataset_name = "building"
 
-    # for dataset_name in dataset_names:        
-    delete_folders()
-    cs = get_config_space()
-    optimizer = QuickOptimizer(
-        cs,
-        max_fidelity=10,
-        perf_predictor=perf_predictor,
-        cost_predictor=cost_predictor,
-        cost_aware=True,
-        cost_factor=1.0,
-        acq_fn="ei",
-        patience=5,
-        tol=0.001,
-        refit=False,
-        path=f"/work/dlclarge2/dasb-Camvid/qtt_states/{uuid.uuid4().hex}",
-        seed=seed,
-        verbosity = -1 
-    )
+    for dataset_name in dataset_names:        
+        delete_folders()
+        cs = get_config_space()
+        optimizer = QuickOptimizer(
+            cs,
+            max_fidelity=10,
+            perf_predictor=perf_predictor,
+            cost_predictor=cost_predictor,
+            cost_aware=True,
+            cost_factor=1.0,
+            acq_fn="ei",
+            patience=5,
+            tol=0.001,
+            refit=False,
+            path=f"/work/dlclarge2/dasb-Camvid/qtt_states/{uuid.uuid4().hex}",
+            seed=seed,
+            verbosity = -1 
+        )
 
-    task_info = {
-        "dataset_name": dataset_name,
-        "output_path": output_path,
-        "seed" : seed
-    }
+        task_info = {
+            "dataset_name": dataset_name,
+            "output_path": output_path,
+            "seed" : seed
+        }
 
-    metafeat = get_meta_data(dataset_name)
+        metafeat = get_meta_data(dataset_name)
 
-    print("Optimiser Setup")
-    optimizer.setup(128, metafeat)
+        print("Optimiser Setup")
+        optimizer.setup(128, metafeat)
 
-    tuner = QuickTuner(
-        optimizer,
-        finetune_script,
-    )
+        tuner = QuickTuner(
+            optimizer,
+            finetune_script,
+        )
 
-    # for time_budget in time_budgets:
-    traj, runtime, history = tuner.run(fevals=100, trial_info=task_info, time_budget=time_budget)
-    print(traj, runtime, history)
-    config_id, config, score, budget, cost, info = tuner.get_incumbent()
+        for time_budget in time_budgets:
+            traj, runtime, history = tuner.run(fevals=100, trial_info=task_info, time_budget=time_budget)
+            print(traj, runtime, history)
+            config_id, config, score, budget, cost, info = tuner.get_incumbent()
 
-    result = {
-        "DATASET": dataset_name,
-        "SEED" : seed,
-        "QTT_CONFIG": config,
-        "QTT_TUNING_SCORE": score,
-        "TIME_BUDGET": time_budget
-    }
-    if os.path.exists(results_csv_path):
-        pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
-    else:
-        pd.DataFrame([result]).to_csv(results_csv_path, index=False)
+            result = {
+                "DATASET": dataset_name,
+                "SEED" : seed,
+                "QTT_CONFIG": config,
+                "QTT_TUNING_SCORE": score,
+                "TIME_BUDGET": time_budget
+            }
+            if os.path.exists(results_csv_path):
+                pd.DataFrame([result]).to_csv(results_csv_path, mode='a', index=False, header=False)
+            else:
+                pd.DataFrame([result]).to_csv(results_csv_path, index=False)
