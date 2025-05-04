@@ -39,6 +39,7 @@ import sys
 sam2_checkpoint = "third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt"
 model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
 
+
 class BCEDiceLoss(nn.Module):
     def __init__(self):
         super(BCEDiceLoss, self).__init__()
@@ -46,10 +47,17 @@ class BCEDiceLoss(nn.Module):
 
     def forward(self, inputs, targets):
         bce_loss = self.bce(inputs, targets)
+
         inputs = torch.sigmoid(inputs)
+
+        inputs = inputs.view(inputs.size(0), -1)
+        targets = targets.view(targets.size(0), -1)
+
         smooth = 1e-5
-        intersection = (inputs * targets).sum()
-        dice_loss = 1 - (2. * intersection + smooth) / (inputs.sum() + targets.sum() + smooth)
+        intersection = (inputs * targets).sum(dim=1)
+        dice = (2. * intersection + smooth) / (inputs.sum(dim=1) + targets.sum(dim=1) + smooth)
+        dice_loss = 1 - dice.mean()
+
         return bce_loss + dice_loss
 
 def numpy_collate(batch):
@@ -133,14 +141,22 @@ def main(args, max_time=10**18):
     val_iou = []
 
     predictor.model.train()
+    time_exceeded = False
+
     start_time = time.time()
 
     for epoch in range(args.num_train_epochs):
         batch_iou = batch_loss = 0
 
         for i, batch in tqdm(enumerate(train_loader), total=len(train_loader), desc="Training Progress", leave=True):
+            
+            if time.time() - start_time > max_time:
+                print(f"Time limit of {max_time} seconds reached. Stopping training early.")
+                time_exceeded = True
+                break
+            
             sample = batch[0]
-            if len(batch) == 0:
+            if len(sample) == 0:
                 continue
 
             image, mask, input_box = sample["pixel_values"], sample["ground_truth_mask"], sample["input_box"]
@@ -166,7 +182,10 @@ def main(args, max_time=10**18):
             )
 
             prd_masks = predictor._transforms.postprocess_masks(low_res_masks, predictor._orig_hw[-1])
-            gt_mask = torch.tensor(mask).unsqueeze(0).float().to(device)
+            gt_mask = torch.tensor(mask).float().to(device)
+
+            if len(gt_mask.shape)==2:
+                gt_mask = gt_mask.unsqueeze(0)
 
             loss = loss_fn(prd_masks[:, 0], gt_mask)
             batch_loss += loss.item()
@@ -208,15 +227,21 @@ def main(args, max_time=10**18):
         elif isinstance(scheduler, (StepLR, CosineAnnealingLR)):
             scheduler.step()
 
-        if time.time() - start_time > max_time:
-            print(f"Time limit of {max_time} seconds reached. Stopping training early.")
+        if time_exceeded:
             break
 
-    plot_training_metrics(train_loss, train_iou, val_iou, save_path='training_metrics.png')
+    # plot_training_metrics(train_loss, train_iou, val_iou, save_path='training_metrics.png')
 
     avg_iou = sum(train_iou) / len(train_iou)
     avg_loss = sum(train_loss) / len(train_loss)
     cost = time.time() - start_time
+
+    # test_score = test(
+    #     split = "test",
+    #     predicted_model=None, 
+    #     predicted_model_path = output_dir,
+    #     args=args,
+    #     save_images = True)
 
     report = {
         "dataset": args.dataset_name,

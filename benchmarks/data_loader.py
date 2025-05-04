@@ -100,40 +100,35 @@ def get_pd_dataset(dataset_name, root, split="train"):
     return df
 
 
-def load_binary_df(image_root, mask_root):
-    """
-    Loads image and mask paths, then splits them into train and test sets.
-    Filters out entries where the image or corresponding mask file is invalid.
 
-    :param image_root: Directory containing images.
-    :param mask_root: Directory containing mask images.
-    :return: DataFrames for training and testing datasets.
-    """
-    
+def load_binary_df_from_same_root(image_dir, mask_dir, name):
     image_files = []
     mask_files = []
-    for root, dirs, files in os.walk(image_root):
-        for file in files:
-            if ".jpg" in file:
-                file_path = os.path.join(root, file)
-                image_files.append(file_path)
 
-    mask_files = [m.replace(image_root, mask_root) for m in image_files] 
-    mask_files = [m.replace(".jpg", ".png") for m in mask_files] 
+    for filename in os.listdir(image_dir):
+        if filename.endswith(".png"):
+            img_path = os.path.join(image_dir, filename)
+            mask_path = os.path.join(mask_dir, filename)
+            if os.path.exists(mask_path):
+                image_files.append(img_path)
+                mask_files.append(mask_path)
 
-    # Create DataFrame
     df = pd.DataFrame({'image_paths': image_files, 'mask_paths': mask_files})
 
-    # Split into train and test
+    output_dir = "/home/dasb/workspace/QTT_SEG/benchmarks/dataframes"
+    os.makedirs(output_dir, exist_ok=True)
+
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
 
-    # # Save CSVs
-    train_df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/leaf_train.csv", index=False)
-    test_df.to_csv("/home/dasb/workspace/QTT_SEG/benchmarks/dataframes/leaf_test.csv", index=False)
+    train_df.to_csv(os.path.join(output_dir, f"{name}_train.csv"), index=False)
+    test_df.to_csv(os.path.join(output_dir, f"{name}_test.csv"), index=False)
 
-    print("Train CSV files saved.")
+    print("Train and test CSV files saved.")
 
 if __name__ == "__main__":
-    image_root = "/work/dlclarge2/dasb-Camvid/datasets/fakhrealam9537/leaf-disease-segmentation-dataset/versions/4/data/data/images/"
-    mask_root = "/work/dlclarge2/dasb-Camvid/datasets/fakhrealam9537/leaf-disease-segmentation-dataset/versions/4/data/data/masks/"
-    load_binary_df(image_root, mask_root)
+    
+    df = load_binary_df_from_same_root(
+        image_dir="/work/dlclarge2/dasb-Camvid/datasets/sadhoss/vale-semantic-terrain-segmentation/versions/1/raw_images/raw_images",
+        mask_dir = "/work/dlclarge2/dasb-Camvid/datasets/sadhoss/vale-semantic-terrain-segmentation/versions/1/mask_uint8_deeplab/mask_uint8_deeplab",
+        name="terrain"
+    )

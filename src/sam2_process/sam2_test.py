@@ -17,6 +17,7 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 from PIL import Image
 from torchmetrics.classification import JaccardIndex
+from src.utils.utils import get_parser
 
 sam2_checkpoint = "third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt"
 model_cfg = "configs/sam2.1/sam2.1_hiera_t.yaml"
@@ -79,14 +80,19 @@ def test(
                 continue
             
             image, mask, input_box = batch["pixel_values"], batch["ground_truth_mask"], batch["input_box"]
-
+            
             predictor.set_image(image)
             prd_masks, _, _ = predictor.predict(
                 box = input_box
             )   
             
             gt_mask = torch.tensor(mask).float()
-            prd_mask = torch.sigmoid(torch.from_numpy(prd_masks[0]))
+            if len(gt_mask.shape)==2:
+                prd_mask = prd_masks[0]
+            else:
+                prd_mask = prd_masks[:,0]
+            prd_mask = torch.sigmoid(torch.from_numpy(prd_mask))
+            # print(image.shape, mask.shape, input_box.shape,gt_mask.shape, prd_mask.shape)
 
             gt_mask_bin = gt_mask.int()
             prd_mask_bin = (prd_mask > 0.5).int()
@@ -112,9 +118,10 @@ def test(
 
                 
 if __name__ == "__main__":
-
-        mean_score = test(
-                dataset_name="building",
-                zero_shot = True,
-        )
-        print(mean_score)
+    parser = get_parser() 
+    args = parser.parse_args()
+    mean_score = test(
+        zero_shot = True,
+        args = args
+    )
+    print(mean_score)

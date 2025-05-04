@@ -21,7 +21,7 @@ from src.sam2_process.sam2_test import test
 from src.data.custom_dataloader import CustomDataset
 from src.utils.utils import get_config_space
 
-meta_file_path = "/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam_train.csv"
+meta_file_path = "/home/dasb/workspace/QTT_SEG/src/finetune_wrapper/finetuning_results_sam.csv"
 perf_predictor_path = "/home/dasb/.cache/qtt_new/PerfPredictor/"
 cost_predictor_path = "/home/dasb/.cache/qtt_new/CostPredictor/"
 output_path = "/work/dlclarge2/dasb-Camvid/config_checkpoints"
@@ -31,8 +31,9 @@ qtt_logs_path =  Path("/home/dasb/workspace/QTT_SEG/qtt/")
 qtt_states_path = Path("/work/dlclarge2/dasb-Camvid/qtt_states/")
 
 train_predictors = False
+seed = 0
 time_budgets = [180, 360, 540]
-dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building"]
+dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building", "cholec", "golf", "human_parsing", "terrain", "US"]
 
 def delete_folders():
     print("Flushing stale files...")
@@ -56,10 +57,9 @@ def delete_folders():
 if __name__ == "__main__":
     meta_df = pd.read_csv(meta_file_path)
     
-    meta_df = meta_df.drop(["num_prompts"], axis=1)
     cost = meta_df["cost"]
     curve = meta_df.filter(regex=r'^epoch_\d{1,2}_iou$')
-    config = meta_df.drop(columns=["cost", "dataset", "opt_betas"] + curve.columns.tolist())
+    config = meta_df.drop(columns=["cost", "dataset"] + curve.columns.tolist())
     X = config
     y = curve.values
 
@@ -76,8 +76,6 @@ if __name__ == "__main__":
     else:
         perf_predictor = PerfPredictor().load(perf_predictor_path)
         cost_predictor = CostPredictor().load(cost_predictor_path)
-
-    seed = 0
 
     for dataset_name in dataset_names:        
         delete_folders()
@@ -116,8 +114,17 @@ if __name__ == "__main__":
 
         for time_budget in time_budgets:
             traj, runtime, history = tuner.run(fevals=100, trial_info=task_info, time_budget=time_budget)
-            print(traj, runtime, history)
             config_id, config, score, budget, cost, info = tuner.get_incumbent()
+            df = pd.DataFrame([
+                {
+                    'dataset': entry['dataset'],
+                    'config_id': entry['config-id'],
+                    'score': entry['score'],
+                    'cost' : entry['cost']
+                }
+                for entry in history
+            ])
+            df.to_csv(f"qtt_history_logs/{dataset_name}_{time_budget}.csv")
 
             result = {
                 "DATASET": dataset_name,

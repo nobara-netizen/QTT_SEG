@@ -28,7 +28,6 @@ def delete_items(starting_with="kos", directory="."):
 
 
 if __name__ == "__main__":
-
-    path = kagglehub.dataset_download("fakhrealam9537/leaf-disease-segmentation-dataset")
+    path = kagglehub.dataset_download("sadhoss/vale-semantic-terrain-segmentation")
 
     print("Path to dataset files:", path)

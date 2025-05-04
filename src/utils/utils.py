@@ -14,49 +14,44 @@ import matplotlib.pyplot as plt
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", default="building", type=str, help="Dataset Name")
+    parser.add_argument("--dataset_name", default="danish-golf-courses-orthophotos", type=str, help="Dataset Name")
     parser.add_argument("--output_dir", default="./outputs", type=str, help="Output path")
     parser.add_argument("--num_train_epochs", default=10, type=int, help="Number of training epochs")
     parser.add_argument('--return_scores_per_epoch', action='store_true', help="Return scores per epoch")
 
     # Hyperparameters
-    parser.add_argument("--lr", default=1e-5, type=float, help="Initial learning rate")
-    parser.add_argument("--weight_decay", default=5e-4, type=float, help="Weight decay (L2 regularization)")
+    parser.add_argument("--lr", default=0.0001, type=float, help="Initial learning rate")
+    parser.add_argument("--weight_decay", default=0.0001, type=float, help="Weight decay (L2 regularization)")
 
     # LoRA Hyperparameters
     parser.add_argument("--lora", default=0, type=int, choices=[0, 1], help="Enable LoRA")
-    parser.add_argument("--lora_targets", type=str, default="modules", help="Choose which attention modules to apply LoRA to: 'self_attn', or 'cross_attn'.")
-    parser.add_argument("--lora_rank", default=8, type=int, help="LoRA rank")
-    parser.add_argument("--lora_dropout", default=0, type=float, help="LoRA Dropout")
-
-    # Optimizer arguments
-    parser.add_argument("--opt", default="adam", help="Optimizer type")
-    parser.add_argument("--opt_betas", type=eval, default=(0.9, 0.999), help="Betas for Adam/AdamW (Tuple)")
+    parser.add_argument("--lora_rank", default=4, type=int, help="LoRA rank")
+    parser.add_argument("--lora_dropout", default=0.1, type=float, help="LoRA Dropout")
 
     # Scheduler arguments
     parser.add_argument("--sched", choices=["cosine", "cosine_warm", "step", "plateau", "onecycle", "poly"], 
-                        default="onecycle", help="Learning rate scheduler")
-    parser.add_argument("--decay_rate", default=0.5, type=float, help="Decay rate (e.g., for plateau/step schedulers)")
-    parser.add_argument("--patience_epochs", default=0, type=int, help="Patience epochs for plateau scheduler")
+                        default="cosine", help="Learning rate scheduler")
+    parser.add_argument("--decay_rate", default=0.8, type=float, help="Decay rate (e.g., for plateau/step schedulers)")
+    parser.add_argument("--patience_epochs", default=2, type=int, help="Patience epochs for plateau scheduler")
 
     # CosineAnnealingWarmRestarts specific
-    parser.add_argument("--cosine_t0", default=5, type=int, help="T_0 for CosineAnnealingWarmRestarts")
-    parser.add_argument("--cosine_t_mult", default=1, type=int, help="T_mult for CosineAnnealingWarmRestarts")
+    parser.add_argument("--cosine_t0", default=2, type=int, help="T_0 for CosineAnnealingWarmRestarts")
+    parser.add_argument("--cosine_t_mult", default=2, type=int, help="T_mult for CosineAnnealingWarmRestarts")
 
     # OneCycleLR specific
-    parser.add_argument("--onecycle_pct_start", default=0.1, type=float, help="pct_start for OneCycleLR")
-    parser.add_argument("--onecycle_div_factor", default=100.0, type=float, help="div_factor for OneCycleLR")
-    parser.add_argument("--onecycle_final_div_factor", default=10.0, type=float, help="final_div_factor for OneCycleLR")
+    parser.add_argument("--onecycle_pct_start", default=0.08, type=float, help="pct_start for OneCycleLR")
+    parser.add_argument("--onecycle_div_factor", default=65, type=float, help="div_factor for OneCycleLR")
+    parser.add_argument("--onecycle_final_div_factor", default=320, type=float, help="final_div_factor for OneCycleLR")
 
     # StepLR specific
-    parser.add_argument("--step_size", default=5, type=int, help="Step size for StepLR")
+    parser.add_argument("--step_size", default=3, type=int, help="Step size for StepLR")
 
     # PolynomialLR specific
-    parser.add_argument("--poly_power", default=0.9, type=float, help="Power for PolynomialLR")
+    parser.add_argument("--poly_power", default=0.5, type=float, help="Power for PolynomialLR")
 
     # Augmentation Hyperparameters
-    parser.add_argument("--horizontal_flip", default=1, type=int, choices=[0, 1], help="Enable horizontal flip augmentation")
-    parser.add_argument("--vertical_flip", default=1, type=int, choices=[0, 1], help="Enable vertical flip augmentation")
+    parser.add_argument("--horizontal_flip", default=0, type=int, choices=[0, 1], help="Enable horizontal flip augmentation")
+    parser.add_argument("--vertical_flip", default=0, type=int, choices=[0, 1], help="Enable vertical flip augmentation")
     parser.add_argument("--random_rotate", default=1, type=int, choices=[0, 1], help="Enable random rotation augmentation")
 
     return parser
@@ -79,16 +74,11 @@ def get_config_space():
     lora = OrdinalHyperparameter("lora", [0, 1])
     lora_rank = OrdinalHyperparameter("lora_rank", [4, 8, 16])
     lora_dropout = OrdinalHyperparameter("lora_dropout", [0.0, 0.1])
-    lora_targets = Categorical("lora_targets", ["modules"])
 
     # Augmentations
     horizontal_flip = OrdinalHyperparameter("horizontal_flip", [0, 1])
     vertical_flip = OrdinalHyperparameter("vertical_flip", [0, 1])
     random_rotate = OrdinalHyperparameter("random_rotate", [0, 1])
-
-    # Optimizer
-    opt = Categorical("opt", ["adamw", "adam"])
-    opt_betas = Categorical("opt_betas", [(0.9, 0.999)])
 
     # Scheduler
     sched = Categorical("sched", ["cosine", "onecycle", "plateau", "cosine_warm", "step", "poly"])
@@ -115,9 +105,9 @@ def get_config_space():
     # Add all hyperparameters to config space
     cs.add_hyperparameters([
         lr, wd,
-        lora, lora_rank, lora_dropout, lora_targets,
+        lora, lora_rank, lora_dropout,
         horizontal_flip, vertical_flip, random_rotate,
-        opt, opt_betas, sched, decay_rate, patience_epochs,
+        sched, decay_rate, patience_epochs,
         cosine_t0, cosine_t_mult,
         onecycle_pct_start, onecycle_div_factor, onecycle_final_div_factor,
         step_size, poly_power

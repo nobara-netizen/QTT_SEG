@@ -1,15 +1,16 @@
-third_party/*
-outputs/*
-*.png
-config_checkpoints/*
-qtt
-costpredictor
-perfpredictor
-*.csv
-logs
-quicktunetool
 benchmarks
+Best_Scores
+costpredictor
+logs
 outputs
+perfpredictor
+qtt
+qtt_history_logs
+quicktunetool
+result_plots
+third_party/*
+*.csv
+*.png
 
 # macOS system files
 .DS_Store

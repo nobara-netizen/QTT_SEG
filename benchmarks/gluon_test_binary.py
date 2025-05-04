@@ -7,7 +7,7 @@ from PIL import Image
 import numpy as np
 
 if __name__ == "__main__":
-    time_budgets = [180, 360, 540]
+    time_budgets = [540]
     dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building"]
     benchmark_file = "benchmarks/gluon_iters.csv"
     if not os.path.exists(benchmark_file):
@@ -22,7 +22,7 @@ if __name__ == "__main__":
             test_data = test_data.rename(columns={'image_paths': 'image', 'mask_paths': 'label'})
             
             
-            save_path = f"/work/dlclarge2/dasb-Camvid/autogluon/tmp/{uuid.uuid4().hex}-automm_semantic_seg"
+            save_path = f"/work/dlclarge2/dasb-Camvid/autogluon/tmp/{dataset_name}_{time_budget}"
             predictor = MultiModalPredictor(
                 problem_type="semantic_segmentation", 
                 label="label",

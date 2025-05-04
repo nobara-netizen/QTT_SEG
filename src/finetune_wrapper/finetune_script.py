@@ -1,5 +1,4 @@
 from src.sam2_process import sam2_train
-from src.sam1_process import sam1_train
 import argparse
 import random
 import os
@@ -102,7 +101,7 @@ if __name__ == "__main__":
     i = 0
     while i <  num_configs:
         try:
-            dataset_name = np.random.choice(["leaf", "polyp", "eyes", "lesion", "fiber", "building"])
+            dataset_name = np.random.choice(["leaf", "polyp", "eyes", "lesion", "fiber", "building", "cholec", "golf", "human_parsing", "terrain", "US"])
             print(dataset_name)
             config = cs.sample_configuration()
             job = {

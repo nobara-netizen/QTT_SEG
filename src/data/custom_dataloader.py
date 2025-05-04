@@ -35,6 +35,16 @@ def save_mask_with_bbox(mask, bbox, save_path="mask_with_bbox.png"):
     cv2.imwrite(save_path, mask_vis)
     print(f"Saved: {save_path}")
 
+def save_mask_with_bboxes(mask, prompts, save_path="mask_with_bboxes.png"):
+    mask_vis = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+
+    for prompt in prompts:
+        x_min, y_min, x_max, y_max = prompt.flatten()  
+        cv2.rectangle(mask_vis, (x_min, y_min), (x_max, y_max), color=(0, 255, 0), thickness=2)
+
+    cv2.imwrite(save_path, mask_vis)
+    print(f"Saved: {save_path}")
+
 def get_prompt(ground_truth_map, num_prompts):
     y_indices, x_indices = np.where(ground_truth_map > 0)
     foreground_points = list(zip(x_indices, y_indices)) 
@@ -100,11 +110,10 @@ def get_largest_bounding_box(ground_truth_map, min_area=50):
     return best_box
 
 class CustomDataset():
-    def __init__(self, dataset_name, split="test", multiclass=False, args=None):
+    def __init__(self, dataset_name, split="test", args=None):
         self.args = args
         self.split = split
         self.dataset_name = dataset_name
-        self.multiclass = multiclass
 
         df_folder = "benchmarks/dataframes"
         full_df = pd.read_csv(f"{df_folder}/{self.dataset_name}_train.csv")[:100]
@@ -141,28 +150,28 @@ class CustomDataset():
 
     def __getitem__(self, idx):
         idx = int(idx)
-        image_path = self.df[self.image_col].iloc[idx]
-        image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-        if image is None or image.size == 0:
-            print(f"[Warning] Empty or invalid image at {image_path}. Skipping index {idx}.")
-            return self.__getitem__((idx + 1) % len(self))  
 
-        if len(image.shape) == 3:  
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)  
-        else: 
-            image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB) 
+        while True:
+            image_path = self.df[self.image_col].iloc[idx]
+            image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+            if image is None or image.size == 0:
+                print(f"[Warning] Invalid image at {image_path}. Skipping index {idx}.")
+                idx = (idx + 1) % len(self)
+                continue
 
-        mask_path = self.df[self.label_col].iloc[idx]
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        
-        if mask is None or mask.size == 0 or np.sum(mask) == 0:
-            print(f"[Warning] Empty or invalid mask at {mask_path}. Skipping index {idx}.")
-            return self.__getitem__((idx + 1) % len(self))
+            if len(image.shape) == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            else:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
-        if self.transform:
-            augmented = self.transform(image=image, mask=mask)
-            image = augmented["image"]
-            mask = augmented["mask"]
+            mask_path = self.df[self.label_col].iloc[idx]
+            mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask is None or mask.size == 0 or np.sum(mask) == 0:
+                print(f"[Warning] Invalid mask at {mask_path}. Skipping index {idx}.")
+                idx = (idx + 1) % len(self)
+                continue
+
+            break  # valid image and mask found
 
         r = min(1024 / image.shape[1], 1024 / image.shape[0])
         new_width = int(image.shape[1] * r)
@@ -170,21 +179,43 @@ class CustomDataset():
 
         image = cv2.resize(image, (new_width, new_height))
         mask = cv2.resize(mask, (new_width, new_height), interpolation=cv2.INTER_NEAREST)
-        mask = (mask > 0).astype(np.uint8)
-        prompt = get_bounding_box_prompt(mask)
+
+        if self.transform:
+            augmented = self.transform(image=image, mask=mask)
+            image = augmented["image"]
+            mask = augmented["mask"]
+
+        classes = np.unique(mask)
+
+        if len(classes) > 2:        
+            binary_mask = []
+            prompt = []
+            for c in classes:
+                b = np.zeros_like(mask, dtype=np.uint8)
+                if c != 0: # assumes background class is 0
+                    b[mask == c] = 1
+                p = get_bounding_box_prompt(b)
+                if p and len(p) == 4:
+                    prompt.append(np.array(p).reshape(1, 4))
+                    binary_mask.append(b)
+
+        else:
+            binary_mask = (mask > 0).astype(np.uint8)
+            prompt = get_bounding_box_prompt(binary_mask)
+            prompt = np.array(prompt).reshape(1, 4)
 
         inputs = {
-            "pixel_values" : image,
-            "ground_truth_mask" : mask,
-            "input_box" : np.array(prompt).reshape(1,4)
+            "pixel_values": np.array(image),
+            "ground_truth_mask": np.array(binary_mask),
+            "input_box": np.array(prompt)
         }
-        # save_mask_with_bbox((mask * 255).astype(np.uint8), prompt, save_path=f"prompt_visual_{idx}.png")
+
         return inputs
 
 
 if __name__ == "__main__":
-    dataset_name = "leaf"
+    dataset_name = "US"
     dataset = CustomDataset(dataset_name, split="train")
-    inputs = dataset[1]
+    inputs = dataset[0]
     for k, v in inputs.items():
         print(k, v.shape)
