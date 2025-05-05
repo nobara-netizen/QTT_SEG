@@ -218,7 +218,7 @@ def main(args, max_time=10**18):
 
         if val_score > best_score:
             best_score = val_score
-            # torch.save(predictor.model.state_dict(), output_dir)
+            torch.save(predictor.model.state_dict(), output_dir)
 
         lc[f"epoch_{epoch}_iou"] = val_score
 
@@ -236,12 +236,12 @@ def main(args, max_time=10**18):
     avg_loss = sum(train_loss) / len(train_loss)
     cost = time.time() - start_time
 
-    # test_score = test(
-    #     split = "test",
-    #     predicted_model=None, 
-    #     predicted_model_path = output_dir,
-    #     args=args,
-    #     save_images = True)
+    test_score = test(
+        split = "test",
+        predicted_model=None, 
+        predicted_model_path = output_dir,
+        args=args,
+        save_images = True)
 
     report = {
         "dataset": args.dataset_name,

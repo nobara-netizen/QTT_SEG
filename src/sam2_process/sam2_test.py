@@ -104,8 +104,11 @@ def test(
             if save_images:
                 if images_saved < 5:
                     image_pil = transforms.ToPILImage()(image)
+                    if len(gt_mask.shape)>2:
+                        gt_mask = (torch.argmax(gt_mask, dim=0).byte())* 255
+                        prd_mask = (torch.argmax(prd_mask, dim=0).byte())* 255
                     gt_mask_pil = transforms.ToPILImage()(gt_mask)
-                    prd_mask_pil = transforms.ToPILImage()((prd_mask > 0.5).float())
+                    prd_mask_pil = transforms.ToPILImage()(prd_mask)
 
                     image_pil.save(os.path.join(output_dir, f"image_{images_saved}.png"))
                     gt_mask_pil.save(os.path.join(output_dir, f"gt_mask_{images_saved}.png"))
@@ -122,6 +125,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     mean_score = test(
         zero_shot = True,
-        args = args
+        args = args,
+        save_images=True
     )
     print(mean_score)

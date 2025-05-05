@@ -30,7 +30,7 @@ results_csv_path = "results.csv"
 qtt_logs_path =  Path("/home/dasb/workspace/QTT_SEG/qtt/")
 qtt_states_path = Path("/work/dlclarge2/dasb-Camvid/qtt_states/")
 
-train_predictors = False
+train_predictors = True
 seed = 0
 time_budgets = [180, 360, 540]
 dataset_names =  ["leaf", "polyp", "eyes", "lesion", "fiber", "building", "cholec", "golf", "human_parsing", "terrain", "US"]

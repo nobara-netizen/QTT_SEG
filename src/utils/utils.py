@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name", default="danish-golf-courses-orthophotos", type=str, help="Dataset Name")
+    parser.add_argument("--dataset_name", default="golf", type=str, help="Dataset Name")
     parser.add_argument("--output_dir", default="./outputs", type=str, help="Output path")
-    parser.add_argument("--num_train_epochs", default=10, type=int, help="Number of training epochs")
+    parser.add_argument("--num_train_epochs", default=1000, type=int, help="Number of training epochs")
     parser.add_argument('--return_scores_per_epoch', action='store_true', help="Return scores per epoch")
 
     # Hyperparameters
